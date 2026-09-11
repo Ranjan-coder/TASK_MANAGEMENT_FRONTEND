@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { tasksApi } from "../../../../lib/api/tasks.api";
+import type { CreateTaskPayload } from "../../../../lib/api/tasks.api";
 import { usersApi } from "../../../../lib/api/users.api";
 import {
   ArrowLeft,
@@ -66,7 +67,7 @@ export default function NewTaskPage() {
   }, [users, userSearch]);
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof form & { tags: string[] }) => tasksApi.createTask(data),
+    mutationFn: (data: CreateTaskPayload) => tasksApi.createTask(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       router.push("/tasks");
@@ -115,9 +116,9 @@ export default function NewTaskPage() {
       ...form,
       tags: form.tags
         ? form.tags
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean)
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
         : [],
       dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : "",
       startDate: form.startDate ? new Date(form.startDate).toISOString() : ""
@@ -150,9 +151,9 @@ export default function NewTaskPage() {
   const addTag = (tag: string) => {
     const currentTags = form.tags
       ? form.tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean)
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
       : [];
     if (!currentTags.includes(tag)) {
       setForm((f) => ({
@@ -295,11 +296,10 @@ export default function NewTaskPage() {
                       key={p.value}
                       type="button"
                       onClick={() => setForm((f) => ({ ...f, priority: p.value }))}
-                      className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-medium transition-all ${
-                        isSelected
+                      className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-medium transition-all ${isSelected
                           ? `${p.color} ring-1 ring-violet-500/40 shadow-sm font-semibold`
                           : "border-slate-800 bg-slate-950/40 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
-                      }`}
+                        }`}
                     >
                       <span>{p.icon}</span>
                       <span>{p.label}</span>
@@ -327,11 +327,10 @@ export default function NewTaskPage() {
                     key={cat}
                     type="button"
                     onClick={() => setForm((f) => ({ ...f, category: cat }))}
-                    className={`text-[11px] px-2 py-0.5 rounded-lg border transition ${
-                      form.category === cat
+                    className={`text-[11px] px-2 py-0.5 rounded-lg border transition ${form.category === cat
                         ? "bg-violet-600/20 border-violet-500 text-violet-300 font-medium"
                         : "bg-slate-800 hover:bg-slate-700 text-slate-400 border-slate-700/60"
-                    }`}
+                      }`}
                   >
                     {cat}
                   </button>
@@ -432,11 +431,10 @@ export default function NewTaskPage() {
                   return (
                     <label
                       key={u._id}
-                      className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-all border ${
-                        isChecked
+                      className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-all border ${isChecked
                           ? "bg-violet-600/15 border-violet-500/40 text-white"
                           : "bg-slate-950/40 border-slate-800/80 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-blue-600 flex items-center justify-center text-xs font-bold text-white shrink-0 shadow-sm">
@@ -451,9 +449,8 @@ export default function NewTaskPage() {
                       </div>
 
                       <div
-                        className={`w-4 h-4 rounded-md border flex items-center justify-center transition shrink-0 ml-2 ${
-                          isChecked ? "bg-violet-600 border-violet-500 text-white" : "border-slate-700 bg-slate-900"
-                        }`}
+                        className={`w-4 h-4 rounded-md border flex items-center justify-center transition shrink-0 ml-2 ${isChecked ? "bg-violet-600 border-violet-500 text-white" : "border-slate-700 bg-slate-900"
+                          }`}
                       >
                         {isChecked && <CheckCircle2 className="w-3.5 h-3.5" />}
                         <input

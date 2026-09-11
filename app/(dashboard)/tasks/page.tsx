@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
@@ -7,7 +8,7 @@ import Link from "next/link";
 import { tasksApi } from "../../../lib/api/tasks.api";
 import { useAuthStore } from "../../../store/authStore";
 import { KanbanBoard } from "../../../components/tasks/KanbanBoard";
-import type { Task } from "../../../types";
+import type { Task, TaskStatus } from "../../../types";
 
 const STATUS_OPTIONS = ["todo", "in_progress", "in_review", "completed", "blocked", "cancelled"];
 const PRIORITY_OPTIONS = ["low", "medium", "high", "critical"];
@@ -28,7 +29,8 @@ const PRIORITY_BADGE: Record<string, string> = {
   low: "bg-slate-500/20 text-slate-400"
 };
 
-export default function TasksPage() {
+/** Inner component — uses useSearchParams, so it must be inside <Suspense> */
+function TasksContent() {
   const searchParams = useSearchParams();
   const initialSearch = searchParams.get("search") || "";
 
@@ -46,7 +48,7 @@ export default function TasksPage() {
     queryFn: () =>
       tasksApi
         .getTasks({
-          status: filters.status || undefined,
+          status: (filters.status as TaskStatus) || undefined,
           priority: filters.priority || undefined,
           search: filters.search || undefined
         })
@@ -229,5 +231,21 @@ export default function TasksPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Page export — wraps the inner component in <Suspense> to satisfy Next.js 14
+ *  App Router requirement for useSearchParams(). */
+export default function TasksPage() {
+  return (
+    <Suspense fallback={
+      <div className="space-y-3 animate-pulse">
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="h-20 rounded-xl bg-slate-800/60" />
+        ))}
+      </div>
+    }>
+      <TasksContent />
+    </Suspense>
   );
 }

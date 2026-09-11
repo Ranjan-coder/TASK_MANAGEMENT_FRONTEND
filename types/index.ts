@@ -12,6 +12,7 @@ export interface User {
   designation?: string;
   status: "active" | "inactive" | "suspended";
   isTwoFactorEnabled: boolean;
+  lastLogin?: string;
   createdAt: string;
 }
 

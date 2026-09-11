@@ -1,5 +1,20 @@
 import apiClient from "./client";
-import type { Task, TaskStatus } from "../../types";
+import type { Task, TaskStatus, TaskPriority } from "../../types";
+
+/** Shape the backend expects when creating / updating a task.
+ *  assignedTo / watchers are user ID strings, not populated User objects. */
+export interface CreateTaskPayload {
+  title: string;
+  description?: string;
+  priority?: TaskPriority;
+  assignedTo?: string[];
+  watchers?: string[];
+  dueDate?: string | null;
+  startDate?: string | null;
+  tags?: string[];
+  category?: string;
+  parentTask?: string | null;
+}
 
 export interface TaskFilters {
   page?: number;
@@ -17,9 +32,9 @@ export const tasksApi = {
 
   getTask: (id: string) => apiClient.get(`/tasks/${id}`),
 
-  createTask: (data: Partial<Task>) => apiClient.post("/tasks", data),
+  createTask: (data: CreateTaskPayload) => apiClient.post("/tasks", data),
 
-  updateTask: (id: string, data: Partial<Task>) =>
+  updateTask: (id: string, data: Partial<CreateTaskPayload> & { status?: TaskStatus }) =>
     apiClient.patch(`/tasks/${id}`, data),
 
   updateStatus: (id: string, status: TaskStatus) =>

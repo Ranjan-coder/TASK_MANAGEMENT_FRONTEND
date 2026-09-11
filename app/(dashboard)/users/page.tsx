@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usersApi } from "../../../lib/api/users.api";
+import type { CreateUserPayload } from "../../../lib/api/users.api";
+import type { User } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import Link from "next/link";
 
@@ -25,7 +27,7 @@ export default function UsersPage() {
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", email: "", password: "", role: "user", department: "", designation: "" });
+  const [createForm, setCreateForm] = useState<CreateUserPayload>({ name: "", email: "", password: "", role: "user", department: "", designation: "" });
   const [createError, setCreateError] = useState("");
 
   const { data, isLoading } = useQuery({
@@ -35,7 +37,7 @@ export default function UsersPage() {
         .then((r) => r.data)
   });
 
-  const users: { _id: string; name: string; email: string; role: string; status: string; department?: string; designation?: string; lastLogin?: string }[] = data?.data ?? [];
+  const users: User[] = data?.data ?? [];
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => usersApi.updateStatus(id, status),
@@ -216,7 +218,7 @@ export default function UsersPage() {
                   <label className="block text-sm font-medium text-slate-300 mb-1.5">Role</label>
                   <select
                     value={createForm.role}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value }))}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as CreateUserPayload["role"] }))}
                     className="w-full px-3 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600 text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
                   >
                     <option value="user">User</option>
