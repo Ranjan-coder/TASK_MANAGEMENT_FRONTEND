@@ -262,39 +262,55 @@ export default function ConversationPage() {
   }, [hasMore, nextCursor, loadingMore, sessionKey, conversationId]);
 
   // ── Send message ────────────────────────────────────────────────────────────
+  // Sends are chained onto this ref so they hit the server strictly in the
+  // order the user triggered them. Without this, firing off several
+  // messages quickly lets their encrypt+POST round trips race independently
+  // — whichever one's request finishes first gets written (and
+  // server-timestamped) first, which visibly reorders messages. Sorting on
+  // display can't fix that after the fact, since the server itself recorded
+  // the wrong order — the sends have to be serialized at the source.
+  const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
+
   const handleSend = useCallback(
-    async (text: string) => {
-      if (!text.trim() || !sessionKey || !user) return;
+    (text: string) => {
+      if (!text.trim() || !sessionKey || !user) return Promise.resolve();
       const plaintext = text.trim();
-      try {
-        const { ciphertext, iv } = await encryptMessage(plaintext, sessionKey);
-        const saved = await sendMessage(conversationId, {
-          ciphertext,
-          iv,
-          type: "text",
-          replyTo: replyTo?._id
-        });
+      const currentReplyTo = replyTo;
 
-        // Show it immediately using the server's confirmed response instead
-        // of waiting for the chat:message socket event to round-trip back to
-        // us — that echo is what was causing the couple-second delay before
-        // your own sent messages appeared. We already have the plaintext (we
-        // just encrypted it), so there's nothing left to decrypt either.
-        // appendMessage dedups by _id, so the later socket echo of this same
-        // message is a harmless no-op.
-        useChatStore.getState().appendMessage(conversationId, { ...saved, decryptedContent: plaintext });
-        if (conv) {
-          useChatStore.getState().upsertConversation({
-            ...conv,
-            lastMessage: saved,
-            lastActivityAt: saved.createdAt
+      const next = sendQueueRef.current.catch(() => {}).then(async () => {
+        try {
+          const { ciphertext, iv } = await encryptMessage(plaintext, sessionKey);
+          const saved = await sendMessage(conversationId, {
+            ciphertext,
+            iv,
+            type: "text",
+            replyTo: currentReplyTo?._id
           });
-        }
 
-        setReplyTo(null);
-      } catch {
-        toast.error("Failed to send message");
-      }
+          // Show it immediately using the server's confirmed response instead
+          // of waiting for the chat:message socket event to round-trip back to
+          // us — that echo is what was causing the couple-second delay before
+          // your own sent messages appeared. We already have the plaintext (we
+          // just encrypted it), so there's nothing left to decrypt either.
+          // appendMessage dedups by _id, so the later socket echo of this same
+          // message is a harmless no-op.
+          useChatStore.getState().appendMessage(conversationId, { ...saved, decryptedContent: plaintext });
+          if (conv) {
+            useChatStore.getState().upsertConversation({
+              ...conv,
+              lastMessage: saved,
+              lastActivityAt: saved.createdAt
+            });
+          }
+
+          setReplyTo(null);
+        } catch {
+          toast.error("Failed to send message");
+        }
+      });
+
+      sendQueueRef.current = next;
+      return next;
     },
     [sessionKey, conversationId, user, replyTo, conv]
   );
@@ -504,8 +520,16 @@ export default function ConversationPage() {
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4">
-          <div ref={topSentinelRef} className="h-1" />
+        {/* flex-col anchors short conversations to the bottom via mt-auto on
+            the first child (below), not `justify-end` on this container —
+            justify-end + overflow-y-auto is a well-known flexbox trap: once
+            content overflows, browsers fail to expose the scrollable region
+            above the fold, so you get stuck and can't reach the true top.
+            mt-auto on the first child achieves the same bottom-anchoring for
+            short content without that overflow bug, since justify-content
+            here stays at its normal default (flex-start). */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col">
+          <div ref={topSentinelRef} className="h-1 mt-auto" />
           {loadingMore && (
             <div className="flex justify-center py-2">
               <div className="animate-spin h-4 w-4 rounded-full border-2 border-violet-500 border-t-transparent" />

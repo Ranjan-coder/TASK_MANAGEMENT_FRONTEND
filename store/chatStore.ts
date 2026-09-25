@@ -109,9 +109,21 @@ export const useChatStore = create<ChatState>((set) => ({
       const existing = state.messages[convId] || [];
       // Avoid duplicates (optimistic + confirmed)
       if (existing.some((m) => m._id === msg._id)) return {};
-      return {
-        messages: { ...state.messages, [convId]: [...existing, msg] }
-      };
+
+      // Insert in true creation order rather than always pushing to the end.
+      // Concurrent sends can have their network responses arrive out of
+      // order (send "4" then "5" quickly, but "5"'s request resolves
+      // first) — trusting arrival order would visually reorder messages.
+      // MongoDB ObjectIds are k-sortable (monotonically increasing per
+      // server process), so comparing _id strings recovers true send order
+      // even when createdAt ties at millisecond resolution.
+      let insertAt = existing.length;
+      while (insertAt > 0 && existing[insertAt - 1]._id > msg._id) {
+        insertAt--;
+      }
+      const next = [...existing.slice(0, insertAt), msg, ...existing.slice(insertAt)];
+
+      return { messages: { ...state.messages, [convId]: next } };
     }),
 
   updateMessage: (convId, msg) =>

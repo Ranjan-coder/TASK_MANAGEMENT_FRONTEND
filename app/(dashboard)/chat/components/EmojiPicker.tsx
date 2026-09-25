@@ -18,9 +18,11 @@ const CATEGORY_ICONS = Object.keys(EMOJI_GROUPS);
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
   onClose: () => void;
+  /** Overrides the popover's position classes. Defaults to anchoring above a bottom input bar (MessageInput's use case). */
+  anchorClassName?: string;
 }
 
-export function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
+export function EmojiPicker({ onSelect, onClose, anchorClassName }: EmojiPickerProps) {
   const [activeCategory, setActiveCategory] = useState(CATEGORY_ICONS[0]);
   const [search, setSearch] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -48,7 +50,10 @@ export function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   return (
     <div
       ref={ref}
-      className="absolute bottom-14 left-2 sm:left-4 z-50 w-[calc(100vw-3rem)] sm:w-72 max-w-[320px] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-150"
+      className={cn(
+        "absolute z-50 w-[calc(100vw-3rem)] sm:w-72 max-w-[320px] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in duration-150",
+        anchorClassName || "bottom-14 left-2 sm:left-4 slide-in-from-bottom-2"
+      )}
     >
       {/* Search */}
       <div className="px-3 py-2.5 border-b border-slate-800">

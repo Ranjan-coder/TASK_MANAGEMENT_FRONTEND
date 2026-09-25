@@ -3,10 +3,11 @@
 import { Message, ChatAttachment } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { format, isToday, isYesterday } from "date-fns";
-import { Trash2, Lock, AlertCircle, Reply, Edit2, Check, X } from "lucide-react";
+import { Trash2, Lock, AlertCircle, Reply, Edit2, Check, X, SmilePlus } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { FilePreview } from "./FilePreview";
 import { DeleteMessageDialog } from "./DeleteMessageDialog";
+import { EmojiPicker } from "./EmojiPicker";
 
 interface MessageBubbleProps {
   message: Message;
@@ -45,6 +46,7 @@ export function MessageBubble({
   const [saving, setSaving] = useState(false);
   const [showTouchActions, setShowTouchActions] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const bubbleContainerRef = useRef<HTMLDivElement>(null);
 
@@ -299,6 +301,40 @@ export function MessageBubble({
                   </button>
                 ))}
               </div>
+
+              {/* More reactions — full emoji picker, not just the 6 quick ones */}
+              {onReact && (
+                <div className="relative shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowReactionPicker((v) => {
+                        const next = !v;
+                        // Pin the toolbar open (independent of CSS :hover) while the
+                        // picker is open, so moving the mouse toward it doesn't make
+                        // the whole toolbar — and the picker inside it — fade out.
+                        if (next) setShowTouchActions(true);
+                        return next;
+                      });
+                    }}
+                    className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-violet-400 hover:bg-slate-700 transition bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-md shrink-0"
+                    title="More reactions"
+                  >
+                    <SmilePlus className="h-3 w-3" />
+                  </button>
+                  {showReactionPicker && (
+                    <EmojiPicker
+                      onSelect={(emoji) => {
+                        onReact(emoji);
+                        setShowReactionPicker(false);
+                        setShowTouchActions(false);
+                      }}
+                      onClose={() => setShowReactionPicker(false)}
+                      anchorClassName={cn("top-8 z-50", isMine ? "right-0" : "left-0")}
+                    />
+                  )}
+                </div>
+              )}
 
               {/* Reply */}
               {onReply && (
