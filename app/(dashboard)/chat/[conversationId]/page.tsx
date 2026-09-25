@@ -67,9 +67,12 @@ export default function ConversationPage() {
   const [showSafetyNumbers, setShowSafetyNumbers] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  /** First unread message's id for this viewing session — renders the "New messages" divider and is the initial scroll target. Null once there's nothing unread (or after a remount, since opening already marks read). */
+  const [unreadMarkerId, setUnreadMarkerId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
+  const unreadDividerRef = useRef<HTMLDivElement>(null);
 
   useJoinConversation(conversationId);
   const sendTyping = useSendTyping(conversationId);
@@ -82,6 +85,22 @@ export default function ConversationPage() {
   const deriveKey = useCallback(
     async (conversation: Conversation): Promise<CryptoKey | null> => {
       if (!user) return null;
+
+      // Fast path: session key already derived for this conversation — skip
+      // the IndexedDB private-key lookup (and any network calls) entirely.
+      // Without this check, switching between already-unlocked conversations
+      // paid an IndexedDB round-trip every time for no reason.
+      const other =
+        conversation.type === "dm"
+          ? conversation.members.find((m) => m.user._id !== user._id)
+          : undefined;
+      const cacheKey =
+        conversation.type === "dm" && other
+          ? dmCacheKey(other.user._id, other.user.keyVersion)
+          : groupCacheKey(conversation._id);
+      const cachedUpfront = getCachedSessionKey(cacheKey);
+      if (cachedUpfront) return cachedUpfront;
+
       let myPrivateKey = await loadPrivateKey(user._id);
       if (!myPrivateKey) {
         try {
@@ -94,7 +113,6 @@ export default function ConversationPage() {
       if (!myPrivateKey) return null;
 
       if (conversation.type === "dm") {
-        const other = conversation.members.find((m) => m.user._id !== user._id);
         if (!other) return null;
         let otherPubKey = other.user.publicKey;
         if (!otherPubKey) {
@@ -105,17 +123,10 @@ export default function ConversationPage() {
           } catch {}
         }
         if (!otherPubKey) return null;
-        const cacheKey = dmCacheKey(other.user._id);
-        const cached = getCachedSessionKey(cacheKey);
-        if (cached) return cached;
         const key = await deriveSessionKey(myPrivateKey, otherPubKey);
         setCachedSessionKey(cacheKey, key);
         return key;
       } else {
-        const cacheKey = groupCacheKey(conversation._id);
-        const cached = getCachedSessionKey(cacheKey);
-        if (cached) return cached;
-
         const myWrappedKey = conversation.groupKeys?.[user._id];
         if (!myWrappedKey) return null;
 
@@ -157,10 +168,15 @@ export default function ConversationPage() {
 
   // ── Load conversation + messages ────────────────────────────────────────────
   useEffect(() => {
-    if (!conversationId) return;
+    // Wait for the authenticated user to be resolved (e.g. on a hard refresh,
+    // /auth/me is still in flight) — otherwise deriveKey() runs with user=null,
+    // the session key permanently fails to derive, and never retries because
+    // this effect doesn't depend on `user`.
+    if (!conversationId || !user) return;
     setActiveConversation(conversationId);
     setReplyTo(null);
     setShowFileUpload(false);
+    setUnreadMarkerId(null);
 
     (async () => {
       setLoading(true);
@@ -183,6 +199,7 @@ export default function ConversationPage() {
         setMessages(conversationId, decrypted);
         setHasMore(msgData.hasMore);
         setNextCursor(msgData.nextCursor);
+        setUnreadMarkerId(msgData.unreadMarkerId);
 
         if (decrypted.length > 0) {
           markRead(decrypted[decrypted.length - 1]._id).catch(() => {});
@@ -194,12 +211,32 @@ export default function ConversationPage() {
         setLoading(false);
       }
     })();
-  }, [conversationId]);
+  }, [conversationId, user?._id]);
 
-  // ── Scroll to bottom on new messages ───────────────────────────────────────
+  // ── Scroll on new messages ──────────────────────────────────────────────────
+  // Jump instantly when a conversation is first opened (avoids animating through
+  // the whole loaded history), but animate smoothly for messages that arrive
+  // while already viewing the conversation. If there's an unread marker, the
+  // first jump lands at the start of the unread section instead of the very
+  // bottom, so nothing unread scrolls past unseen.
+  const lastScrolledConvRef = useRef<string | null>(null);
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [convMessages.length]);
+    // Skip the trivial empty-array render on mount (before messages load) —
+    // otherwise it consumes the "first scroll" flag before there's anything
+    // to scroll to, and the real initial load ends up animating instead of
+    // jumping instantly.
+    if (convMessages.length === 0) return;
+
+    const isFirstScrollForConv = lastScrolledConvRef.current !== conversationId;
+    lastScrolledConvRef.current = conversationId;
+
+    if (isFirstScrollForConv && unreadMarkerId && unreadDividerRef.current) {
+      unreadDividerRef.current.scrollIntoView({ behavior: "auto", block: "start" });
+      return;
+    }
+
+    bottomRef.current?.scrollIntoView({ behavior: isFirstScrollForConv ? "auto" : "smooth" });
+  }, [convMessages.length, conversationId, unreadMarkerId]);
 
   // ── IntersectionObserver for infinite scroll ───────────────────────────────
   useEffect(() => {
@@ -228,20 +265,38 @@ export default function ConversationPage() {
   const handleSend = useCallback(
     async (text: string) => {
       if (!text.trim() || !sessionKey || !user) return;
+      const plaintext = text.trim();
       try {
-        const { ciphertext, iv } = await encryptMessage(text.trim(), sessionKey);
-        await sendMessage(conversationId, {
+        const { ciphertext, iv } = await encryptMessage(plaintext, sessionKey);
+        const saved = await sendMessage(conversationId, {
           ciphertext,
           iv,
           type: "text",
           replyTo: replyTo?._id
         });
+
+        // Show it immediately using the server's confirmed response instead
+        // of waiting for the chat:message socket event to round-trip back to
+        // us — that echo is what was causing the couple-second delay before
+        // your own sent messages appeared. We already have the plaintext (we
+        // just encrypted it), so there's nothing left to decrypt either.
+        // appendMessage dedups by _id, so the later socket echo of this same
+        // message is a harmless no-op.
+        useChatStore.getState().appendMessage(conversationId, { ...saved, decryptedContent: plaintext });
+        if (conv) {
+          useChatStore.getState().upsertConversation({
+            ...conv,
+            lastMessage: saved,
+            lastActivityAt: saved.createdAt
+          });
+        }
+
         setReplyTo(null);
       } catch {
         toast.error("Failed to send message");
       }
     },
-    [sessionKey, conversationId, user, replyTo]
+    [sessionKey, conversationId, user, replyTo, conv]
   );
 
   // ── Edit message ────────────────────────────────────────────────────────────
@@ -259,6 +314,39 @@ export default function ConversationPage() {
       }
     },
     [conversationId, messages, sessionKey, updateMessage]
+  );
+
+  // ── Delete message ──────────────────────────────────────────────────────────
+  const handleDelete = useCallback(
+    async (msgId: string, scope: "me" | "everyone") => {
+      const msgs = messages[conversationId] || [];
+      const original = msgs.find((m) => m._id === msgId);
+      if (!original) return;
+
+      // Optimistic: update immediately instead of waiting on the
+      // chat:message:deleted / chat:message:deletedForMe socket round-trip,
+      // which previously made deletes look like they silently did nothing.
+      if (scope === "everyone") {
+        useChatStore.getState().removeMessage(conversationId, msgId);
+      } else {
+        useChatStore.getState().hideMessageForMe(conversationId, msgId);
+      }
+
+      try {
+        await deleteMessage(msgId, scope);
+      } catch (err: any) {
+        // Revert — the delete didn't actually happen server-side.
+        if (scope === "everyone") {
+          updateMessage(conversationId, original);
+        } else {
+          useChatStore.getState().appendMessage(conversationId, original);
+        }
+        // Surface the real reason when we have one (e.g. the 10-minute
+        // "delete for everyone" window has passed since this was opened).
+        toast.error(err?.response?.data?.message || "Failed to delete message");
+      }
+    },
+    [conversationId, messages, updateMessage]
   );
 
   // ── Encrypt helper (passed to MessageBubble for edit) ───────────────────────
@@ -425,18 +513,28 @@ export default function ConversationPage() {
           )}
 
           {convMessages.map((msg, idx) => (
-            <MessageBubble
-              key={msg._id}
-              message={msg}
-              isMine={msg.sender._id === user?._id}
-              prevMessage={convMessages[idx - 1]}
-              sessionKey={sessionKey}
-              onReact={(emoji) => reactToMessage(msg._id, emoji)}
-              onDelete={msg.sender._id === user?._id ? () => deleteMessage(msg._id) : undefined}
-              onReply={() => setReplyTo(msg)}
-              onEdit={msg.sender._id === user?._id ? (ct, iv) => handleEdit(msg._id, ct, iv) : undefined}
-              encryptFn={encryptFn}
-            />
+            <div key={msg._id}>
+              {msg._id === unreadMarkerId && (
+                <div ref={unreadDividerRef} className="flex items-center gap-3 py-3">
+                  <div className="flex-1 h-px bg-rose-500/30" />
+                  <span className="text-[10px] text-rose-400 font-semibold uppercase tracking-wider shrink-0">
+                    New messages
+                  </span>
+                  <div className="flex-1 h-px bg-rose-500/30" />
+                </div>
+              )}
+              <MessageBubble
+                message={msg}
+                isMine={msg.sender._id === user?._id}
+                prevMessage={convMessages[idx - 1]}
+                sessionKey={sessionKey}
+                onReact={(emoji) => reactToMessage(msg._id, emoji)}
+                onDelete={(scope) => handleDelete(msg._id, scope)}
+                onReply={() => setReplyTo(msg)}
+                onEdit={msg.sender._id === user?._id ? (ct, iv) => handleEdit(msg._id, ct, iv) : undefined}
+                encryptFn={encryptFn}
+              />
+            </div>
           ))}
 
           {/* Typing indicator */}

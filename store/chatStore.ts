@@ -27,7 +27,10 @@ interface ChatState {
   prependMessages: (convId: string, msgs: Message[]) => void;
   appendMessage: (convId: string, msg: Message) => void;
   updateMessage: (convId: string, msg: Message) => void;
+  /** "Delete for everyone" — marks the message as deleted in place (shows the "Message deleted" placeholder). */
   removeMessage: (convId: string, msgId: string) => void;
+  /** "Delete for me" — removes the message from local state entirely, as if it never existed for this viewer. */
+  hideMessageForMe: (convId: string, msgId: string) => void;
 
   // ── Presence & Typing ─────────────────────────────────────────────────────
   handlePresence: (payload: PresencePayload) => void;
@@ -47,7 +50,7 @@ const initialState = {
   conversationsLoaded: false
 };
 
-export const useChatStore = create<ChatState>((set, get) => ({
+export const useChatStore = create<ChatState>((set) => ({
   ...initialState,
 
   // ── Conversation actions ──────────────────────────────────────────────────
@@ -126,6 +129,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [convId]: (state.messages[convId] || []).map((m) =>
           m._id === msgId ? { ...m, isDeleted: true, ciphertext: undefined, iv: undefined } : m
         )
+      }
+    })),
+
+  hideMessageForMe: (convId, msgId) =>
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [convId]: (state.messages[convId] || []).filter((m) => m._id !== msgId)
       }
     })),
 

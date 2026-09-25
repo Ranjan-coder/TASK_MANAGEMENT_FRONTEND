@@ -6,6 +6,7 @@ import { format, isToday, isYesterday } from "date-fns";
 import { Trash2, Lock, AlertCircle, Reply, Edit2, Check, X } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { FilePreview } from "./FilePreview";
+import { DeleteMessageDialog } from "./DeleteMessageDialog";
 
 interface MessageBubbleProps {
   message: Message;
@@ -13,13 +14,20 @@ interface MessageBubbleProps {
   prevMessage?: Message;
   sessionKey: CryptoKey | null;
   onReact?: (emoji: string) => void;
-  onDelete?: () => void;
+  /** Called with "everyone" (sender only) or "me" once the user confirms in the delete dialog. */
+  onDelete?: (scope: "me" | "everyone") => void;
   onReply?: () => void;
   onEdit?: (newCiphertext: string, newIv: string) => Promise<void>;
   encryptFn?: (text: string) => Promise<{ ciphertext: string; iv: string }>;
 }
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
+
+// "Delete for everyone" is only offered within this window of sending — keep
+// in sync with DELETE_FOR_EVERYONE_WINDOW_MS in the backend's chat.service.js.
+// The backend is the source of truth; this only controls whether the option
+// is shown, so the two can drift by a few seconds without causing bugs.
+const DELETE_FOR_EVERYONE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 export function MessageBubble({
   message,
@@ -36,6 +44,7 @@ export function MessageBubble({
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [showTouchActions, setShowTouchActions] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const bubbleContainerRef = useRef<HTMLDivElement>(null);
 
@@ -321,13 +330,13 @@ export function MessageBubble({
                 </button>
               )}
 
-              {/* Delete (own messages only) */}
+              {/* Delete (any message — "delete for me" is always available, "for everyone" only for own messages) */}
               {onDelete && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowTouchActions(false);
-                    onDelete();
+                    setShowDeleteConfirm(true);
                   }}
                   className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-slate-700 transition bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-md shrink-0"
                   title="Delete message"
@@ -339,6 +348,24 @@ export function MessageBubble({
           )}
         </div>
       </div>
+
+      {showDeleteConfirm && onDelete && (
+        <DeleteMessageDialog
+          isMine={isMine}
+          canDeleteForEveryone={
+            isMine && Date.now() - new Date(message.createdAt).getTime() <= DELETE_FOR_EVERYONE_WINDOW_MS
+          }
+          onDeleteForMe={() => {
+            setShowDeleteConfirm(false);
+            onDelete("me");
+          }}
+          onDeleteForEveryone={() => {
+            setShowDeleteConfirm(false);
+            onDelete("everyone");
+          }}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
     </>
   );
 }

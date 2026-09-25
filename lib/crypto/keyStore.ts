@@ -114,24 +114,22 @@ export const ensureUserKeys = async (
   let privKey = await loadPrivateKey(userId);
   let pubKeyB64 = await loadPublicKey(userId);
 
-  // 1. If private key exists, verify or derive public key
-  if (privKey) {
-    if (!pubKeyB64) {
-      try {
-        pubKeyB64 = await exportPublicKeyFromPrivateKey(privKey);
-        await savePublicKey(userId, pubKeyB64);
-      } catch (err) {
-        console.warn("Could not export public key from private key:", err);
-      }
-    }
-  }
-
-  // 2. If no private key or public key exists, generate a fresh keypair
-  if (!privKey || !pubKeyB64) {
+  if (!privKey) {
+    // No local key material at all — the only case where generating a fresh
+    // keypair is safe (there is no existing identity to lose).
     const pair = await generateKeyPair();
     privKey = pair.privateKey;
     pubKeyB64 = pair.publicKeyB64;
     await savePrivateKey(userId, privKey);
+    await savePublicKey(userId, pubKeyB64);
+  } else if (!pubKeyB64) {
+    // A private key exists but its cached public key is missing — recover it
+    // by re-deriving from the private key. IMPORTANT: if this derivation
+    // fails, it must propagate (not be swallowed into generating a new
+    // keypair) — silently replacing a perfectly good private key here would
+    // permanently break decryption of every existing DM session for this
+    // user, including their own previously sent messages.
+    pubKeyB64 = await exportPublicKeyFromPrivateKey(privKey);
     await savePublicKey(userId, pubKeyB64);
   }
 
@@ -184,8 +182,15 @@ export const clearSessionKeyCache = (): void => {
 
 /**
  * Build the cache key for a DM session (between current user and another user).
+ *
+ * Includes the peer's keyVersion so that once fresher conversation data is
+ * fetched (e.g. on reload or reopening the conversation) after the peer
+ * rotates their encryption keys, the old session key — derived from their
+ * previous public key — is never reused. Instead the version bump produces a
+ * new cache key, misses, and forces a correct re-derivation.
  */
-export const dmCacheKey = (otherUserId: string) => `dm:${otherUserId}`;
+export const dmCacheKey = (otherUserId: string, keyVersion?: number) =>
+  `dm:${otherUserId}:v${keyVersion ?? 0}`;
 
 /**
  * Build the cache key for a group session.

@@ -58,10 +58,15 @@ export const updateGroupKeys = (convId: string, newGroupKeys: Record<string, str
 
 export const fetchMessages = (convId: string, cursor?: string, limit = 30) =>
   chatAxios
-    .get<ApiResponse<{ messages: Message[]; hasMore: boolean; nextCursor: string | null }>>(
-      `/conversations/${convId}/messages`,
-      { params: { cursor, limit } }
-    )
+    .get<
+      ApiResponse<{
+        messages: Message[];
+        hasMore: boolean;
+        nextCursor: string | null;
+        /** First unread message in this batch (initial load only) — null if nothing was unread or this is a "load more" page. */
+        unreadMarkerId: string | null;
+      }>
+    >(`/conversations/${convId}/messages`, { params: { cursor, limit } })
     .then((r) => r.data.data);
 
 export const sendMessage = (convId: string, body: SendMessageBody) =>
@@ -78,5 +83,5 @@ export const reactToMessage = (messageId: string, emoji: string) =>
 export const editMessage = (messageId: string, ciphertext: string, iv: string) =>
   chatAxios.patch(`/messages/${messageId}/edit`, { ciphertext, iv }).then((r) => r.data);
 
-export const deleteMessage = (messageId: string) =>
-  chatAxios.delete(`/messages/${messageId}`).then((r) => r.data);
+export const deleteMessage = (messageId: string, scope: "me" | "everyone" = "everyone") =>
+  chatAxios.delete(`/messages/${messageId}`, { data: { scope } }).then((r) => r.data);

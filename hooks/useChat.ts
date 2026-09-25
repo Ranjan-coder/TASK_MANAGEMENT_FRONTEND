@@ -36,6 +36,7 @@ export const useChat = () => {
     appendMessage,
     updateMessage,
     removeMessage,
+    hideMessageForMe,
     upsertConversation,
     handleTyping,
     handlePresence,
@@ -48,13 +49,19 @@ export const useChat = () => {
 
   // ── Decrypt a message using the cached session key ──────────────────────
   const decryptMsg = useCallback(
-    async (msg: Message, convType: "dm" | "group", otherUserId?: string, convId?: string): Promise<Message> => {
+    async (
+      msg: Message,
+      convType: "dm" | "group",
+      otherUserId?: string,
+      convId?: string,
+      otherKeyVersion?: number
+    ): Promise<Message> => {
       if (msg.type === "system" || msg.isDeleted || !msg.ciphertext || !msg.iv) return msg;
 
       try {
         const cacheKey =
           convType === "dm" && otherUserId
-            ? dmCacheKey(otherUserId)
+            ? dmCacheKey(otherUserId, otherKeyVersion)
             : groupCacheKey(convId || msg.conversation);
 
         const sessionKey = getCachedSessionKey(cacheKey);
@@ -92,7 +99,7 @@ export const useChat = () => {
       let decrypted = msg;
       if (conv) {
         const otherMember = conv.members.find((m) => m.user._id !== user._id);
-        decrypted = await decryptMsg(msg, conv.type, otherMember?.user._id, conv._id);
+        decrypted = await decryptMsg(msg, conv.type, otherMember?.user._id, conv._id, otherMember?.user.keyVersion);
       }
 
       appendMessage(msg.conversation, decrypted);
@@ -140,9 +147,14 @@ export const useChat = () => {
       }
     };
 
-    // ── Message deleted ────────────────────────────────────────────────────
+    // ── Message deleted (for everyone) ─────────────────────────────────────
     const onDeleted = ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
       removeMessage(conversationId, messageId);
+    };
+
+    // ── Message deleted for me (syncs across this user's other tabs/devices) ─
+    const onDeletedForMe = ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
+      hideMessageForMe(conversationId, messageId);
     };
 
     // ── Presence ───────────────────────────────────────────────────────────
@@ -199,9 +211,10 @@ export const useChat = () => {
       const conv = conversations.find((c) => c._id === conversationId);
       let decryptedContent: string | undefined;
       try {
+        const otherMember = conv?.members.find((m) => m.user._id !== user._id);
         const cacheKey =
           conv?.type === "dm" && user
-            ? dmCacheKey(conv.members.find((m) => m.user._id !== user._id)?.user._id || "")
+            ? dmCacheKey(otherMember?.user._id || "", otherMember?.user.keyVersion)
             : groupCacheKey(conversationId);
         const sessionKey = getCachedSessionKey(cacheKey);
         if (sessionKey) {
@@ -226,6 +239,7 @@ export const useChat = () => {
     socket.on("chat:read", onRead);
     socket.on("chat:reaction", onReaction);
     socket.on("chat:message:deleted", onDeleted);
+    socket.on("chat:message:deletedForMe", onDeletedForMe);
     socket.on("chat:message:edited", onEdited);
     socket.on("presence:update", onPresence);
     socket.on("chat:member:added", onMemberAdded);
@@ -244,6 +258,7 @@ export const useChat = () => {
       socket.off("chat:read", onRead);
       socket.off("chat:reaction", onReaction);
       socket.off("chat:message:deleted", onDeleted);
+      socket.off("chat:message:deletedForMe", onDeletedForMe);
       socket.off("chat:message:edited", onEdited);
       socket.off("presence:update", onPresence);
       socket.off("chat:member:added", onMemberAdded);
@@ -275,13 +290,21 @@ export const useJoinConversation = (conversationId: string | null) => {
 export const useSendTyping = (conversationId: string | null) => {
   const socket = getSocket();
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
 
   const sendTyping = useCallback(() => {
     if (!socket || !conversationId) return;
-    socket.emit("chat:typing:start", { conversationId });
+
+    // Only emit "start" once per typing burst instead of on every keystroke —
+    // previously this fired a socket event on every single character typed.
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      socket.emit("chat:typing:start", { conversationId });
+    }
 
     if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
     stopTimerRef.current = setTimeout(() => {
+      isTypingRef.current = false;
       socket.emit("chat:typing:stop", { conversationId });
     }, 2000);
   }, [socket, conversationId]);
@@ -289,8 +312,11 @@ export const useSendTyping = (conversationId: string | null) => {
   useEffect(
     () => () => {
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+      if (isTypingRef.current && socket && conversationId) {
+        socket.emit("chat:typing:stop", { conversationId });
+      }
     },
-    []
+    [socket, conversationId]
   );
 
   return sendTyping;
