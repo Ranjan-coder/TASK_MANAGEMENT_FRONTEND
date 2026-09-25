@@ -16,14 +16,16 @@ import {
   Laptop,
   CheckCircle2,
   Sparkles,
-  Camera
+  Camera,
+  Key
 } from "lucide-react";
+import { KeySetupWizard } from "../chat/components/KeySetupWizard";
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
 
-  const [activeSection, setActiveSection] = useState<"profile" | "security" | "sessions">("profile");
+  const [activeSection, setActiveSection] = useState<"profile" | "security" | "sessions" | "encryption">("profile");
   const [profileForm, setProfileForm] = useState({
     name: user?.name ?? "",
     department: user?.department ?? "",
@@ -115,7 +117,8 @@ export default function SettingsPage() {
   const sections = [
     { id: "profile", label: "Profile & Avatar", icon: User },
     { id: "security", label: "Security", icon: Shield },
-    { id: "sessions", label: "Active Sessions", icon: Laptop }
+    { id: "sessions", label: "Active Sessions", icon: Laptop },
+    { id: "encryption", label: "Chat Encryption", icon: Key }
   ];
 
   return (
@@ -418,6 +421,21 @@ export default function SettingsPage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeSection === "encryption" && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-base font-semibold text-white">End-to-End Chat Encryption</h2>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  Your chat messages are encrypted and decrypted directly in your browser using ECDH P-256 + AES-256-GCM.
+                </p>
+              </div>
+
+              <div className="pt-2">
+                <KeySetupWizard />
+              </div>
             </div>
           )}
         </div>

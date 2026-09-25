@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { useUIStore } from "@/store/uiStore";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import {
   Search,
@@ -11,13 +12,15 @@ import {
   ChevronDown,
   User,
   Settings,
-  LogOut
+  LogOut,
+  Menu
 } from "lucide-react";
 
 export function Topbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
+  const { toggleMobileSidebar } = useUIStore();
 
   const [imgError, setImgError] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -45,6 +48,7 @@ export function Topbar() {
     if (pathname === "/notifications") return "Notifications";
     if (pathname === "/audit-logs") return "Audit Logs";
     if (pathname === "/settings") return "Settings";
+    if (pathname === "/chat" || pathname.startsWith("/chat/")) return "Chat";
     return "Workspace";
   };
 
@@ -61,9 +65,16 @@ export function Topbar() {
 
   return (
     <header className="h-16 border-b border-slate-800 bg-slate-900/90 backdrop-blur-xl px-4 sm:px-6 flex items-center justify-between shrink-0 z-30 select-none">
-      {/* Left: Clean Page Title */}
-      <div className="flex items-center gap-3">
-        <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-tight">
+      {/* Left: Hamburger + Clean Page Title */}
+      <div className="flex items-center gap-2.5 sm:gap-3">
+        <button
+          onClick={toggleMobileSidebar}
+          className="md:hidden h-9 w-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition border border-slate-800 shrink-0"
+          aria-label="Toggle navigation menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-tight truncate">
           {getPageTitle()}
         </h1>
       </div>

@@ -14,6 +14,10 @@ export interface User {
   isTwoFactorEnabled: boolean;
   lastLogin?: string;
   createdAt: string;
+  // E2E chat fields
+  publicKey?: string;
+  keyVersion?: number;
+  keyUpdatedAt?: string;
 }
 
 export interface Attachment {
