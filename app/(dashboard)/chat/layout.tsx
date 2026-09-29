@@ -46,7 +46,8 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   const isConversationActive = Boolean(pathname && pathname !== "/chat" && pathname.startsWith("/chat/"));
 
   return (
-    <div className="flex h-full -m-6 md:-m-8 overflow-hidden bg-slate-950">
+    <div className="flex h-[calc(100%+3rem)] md:h-[calc(100%+4rem)] -m-6 md:-m-8 overflow-hidden bg-slate-950">
+      {/* Negative margins cancel the page padding (p-6 / md:p-8), so the height adds it back on both sides */}
       {/* Sidebar: Full width on mobile when at /chat, hidden on mobile when in conversation */}
       <ChatSidebar
         className={isConversationActive ? "hidden md:flex" : "flex"}

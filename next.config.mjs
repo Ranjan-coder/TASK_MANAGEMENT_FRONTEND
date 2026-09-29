@@ -52,6 +52,8 @@ const securityHeaders = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Hide the floating "N" dev-tools button shown by `next dev` (build errors still appear as an overlay).
+  devIndicators: false,
   reactStrictMode: true,
   poweredByHeader: false,
   // The app uses plain <img> tags; turning the optimiser off removes the /_next/image endpoint
