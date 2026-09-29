@@ -24,11 +24,14 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup, onOpenKeySettings }: ChatSidebarProps) {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
   // Customers chat only in project groups that Bonito creates for them
   const canStartChats = user?.role !== "customer";
-  const { conversations, activeConversationId, setActiveConversation, onlineUsers, totalUnread } =
-    useChatStore();
+  const conversations = useChatStore((s) => s.conversations);
+  const activeConversationId = useChatStore((s) => s.activeConversationId);
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
+  const onlineUsers = useChatStore((s) => s.onlineUsers);
+  const totalUnread = useChatStore((s) => s.totalUnread);
   const [search, setSearch] = useState("");
   const [showDMModal, setShowDMModal] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);

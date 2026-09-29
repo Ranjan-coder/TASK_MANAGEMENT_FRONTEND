@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { decryptFile, b64ToBuf } from "@/lib/crypto/e2e";
 import { ChatAttachment } from "@/types/chat";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,13 @@ export function FilePreview({ attachment, sessionKey }: FilePreviewProps) {
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
+
+  // Free the decrypted copy when the bubble unmounts (it stayed in memory all session)
+  useEffect(() => {
+    return () => {
+      if (decryptedUrl) URL.revokeObjectURL(decryptedUrl);
+    };
+  }, [decryptedUrl]);
 
   const handleDecryptAndView = async () => {
     if (decryptedUrl) {

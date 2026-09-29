@@ -14,7 +14,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
   isLoading: true,
-  setUser: (user) => set({ user, isAuthenticated: !!user, isLoading: false }),
+  // Keep the same object when /auth/me returns identical data: effects keyed on `user`
+  // (socket listeners, key loading) would otherwise all re-run on every check.
+  setUser: (user) =>
+    set((state) =>
+      state.user && user && JSON.stringify(state.user) === JSON.stringify(user)
+        ? { isAuthenticated: true, isLoading: false }
+        : { user, isAuthenticated: !!user, isLoading: false }
+    ),
   setLoading: (isLoading) => set({ isLoading }),
   logout: () => set({ user: null, isAuthenticated: false, isLoading: false })
 }));

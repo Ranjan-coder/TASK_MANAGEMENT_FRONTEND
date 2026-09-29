@@ -61,3 +61,16 @@ export const CONTENT_MANAGER_ROLES = ["superadmin", "admin", "marketing"];
 
 // Project set-up: admins only
 export const ADMIN_ONLY_ROUTES = ["/admin/projects", "/admin/reply-times", "/admin/reports", "/admin/moderation", "/admin/overview", "/admin/performance", "/admin/customers", "/admin/privacy", "/admin/payments", "/admin/referrals"];
+
+/**
+ * Right-sized image from Cloudinary: modern format (WebP/AVIF), automatic quality and
+ * at most `width` px wide (served at 2× for sharp phone screens). Only public
+ * res.cloudinary.com "image/upload" URLs are changed — signed/private links and
+ * anything else are returned as-is, since a transform would break their signature.
+ */
+export function sizedImage(url: string | undefined | null, width: number): string {
+  if (!url) return "";
+  const marker = "/image/upload/";
+  if (!url.startsWith("https://res.cloudinary.com/") || !url.includes(marker)) return url;
+  return url.replace(marker, `${marker}f_auto,q_auto,c_limit,w_${Math.round(width * 2)}/`);
+}

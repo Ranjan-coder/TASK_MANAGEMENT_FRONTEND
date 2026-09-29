@@ -7,7 +7,7 @@ import { Home, MessageSquare, Settings, LogOut } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useChatStore } from "@/store/chatStore";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
-import { cn, getInitials } from "@/lib/utils";
+import { cn, getInitials, sizedImage } from "@/lib/utils";
 
 const TABS = [
   { label: "Home", href: "/home", icon: Home },
@@ -21,7 +21,7 @@ const TABS = [
 export function CustomerShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
-  const { totalUnread } = useChatStore();
+  const totalUnread = useChatStore((s) => s.totalUnread);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -81,7 +81,7 @@ export function CustomerShell({ children }: { children: React.ReactNode }) {
             >
               {user?.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
+                <img src={sizedImage(user.avatarUrl, 36)} alt="" className="h-full w-full object-cover" />
               ) : (
                 getInitials(user?.name)
               )}

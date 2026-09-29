@@ -168,6 +168,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   handlePresence: ({ userId, isOnline }) =>
     set((state) => {
+      if (state.onlineUsers.has(userId) === isOnline) return state; // no change → no re-render
       const next = new Set(state.onlineUsers);
       if (isOnline) next.add(userId);
       else next.delete(userId);
@@ -176,7 +177,9 @@ export const useChatStore = create<ChatState>((set) => ({
 
   handleTyping: ({ conversationId, name, isTyping }) =>
     set((state) => {
-      const current = new Set(state.typingUsers[conversationId] || []);
+      const existing = state.typingUsers[conversationId];
+      if (Boolean(existing?.has(name)) === isTyping) return state; // repeat event → no re-render
+      const current = new Set(existing || []);
       if (isTyping) current.add(name);
       else current.delete(name);
       return {

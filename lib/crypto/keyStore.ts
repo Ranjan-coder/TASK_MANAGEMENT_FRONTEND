@@ -58,15 +58,34 @@ export const setKeyStorageTrusted = (trusted: boolean): void => {
 
 // ── IndexedDB helpers ─────────────────────────────────────────────────────────
 
-const openDB = (): Promise<IDBDatabase> =>
-  new Promise((resolve, reject) => {
+// One shared connection (every read used to open a new one and never close it).
+let dbPromise: Promise<IDBDatabase> | null = null;
+const openDB = (): Promise<IDBDatabase> => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       req.result.createObjectStore(STORE_NAME);
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Another tab upgrading or deleting the database: let go so it isn't blocked
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      db.onclose = () => {
+        dbPromise = null;
+      };
+      resolve(db);
+    };
+    req.onerror = () => {
+      dbPromise = null;
+      reject(req.error);
+    };
   });
+  return dbPromise;
+};
 
 const idbPut = async (key: string, value: unknown): Promise<void> => {
   if (isMemoryOnly()) {

@@ -29,8 +29,10 @@ async function searchUsers(query: string) {
 
 export function DirectMessageModal({ onClose }: Props) {
   const router = useRouter();
-  const { user } = useAuthStore();
-  const { conversations, setConversations, onlineUsers } = useChatStore();
+  const user = useAuthStore((s) => s.user);
+  const conversations = useChatStore((s) => s.conversations);
+  const setConversations = useChatStore((s) => s.setConversations);
+  const onlineUsers = useChatStore((s) => s.onlineUsers);
 
   const [search, setSearch] = useState("");
   const [users, setUsers] = useState<any[]>([]);

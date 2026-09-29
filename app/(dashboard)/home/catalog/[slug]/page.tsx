@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Check, ImageIcon, MessageSquare, MapPin } from "lucide-react";
 import { BeforeAfter } from "@/components/customer/BeforeAfter";
 import { contentApi, formatPrice } from "@/lib/api/content.api";
-import { cn } from "@/lib/utils";
+import { cn, sizedImage } from "@/lib/utils";
 
 /** Product / service detail for customers. */
 export default function CatalogItemPage() {
@@ -48,7 +48,7 @@ export default function CatalogItemPage() {
           <div className={cn("aspect-[4/3] rounded-2xl overflow-hidden bg-slate-800", item.kind === "portfolio" && item.beforeImage?.url && image && "hidden")}>
             {image ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={image.url} alt={item.name} className="h-full w-full object-cover" />
+              <img src={sizedImage(image.url, 900)} decoding="async" alt={item.name} className="h-full w-full object-cover" />
             ) : (
               <div className="h-full w-full flex items-center justify-center text-slate-600">
                 <ImageIcon className="h-10 w-10" />
@@ -67,7 +67,7 @@ export default function CatalogItemPage() {
                   className={cn("h-16 w-20 shrink-0 rounded-lg overflow-hidden border-2", i === active ? "border-violet-500" : "border-transparent opacity-70")}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.url} alt="" className="h-full w-full object-cover" />
+                  <img src={sizedImage(img.url, 160)} loading="lazy" decoding="async" alt="" className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>

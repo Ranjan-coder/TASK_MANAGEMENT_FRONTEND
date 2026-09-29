@@ -37,8 +37,8 @@ interface GroupInfoPanelProps {
 
 export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }: GroupInfoPanelProps) {
   const router = useRouter();
-  const { user } = useAuthStore();
-  const { setConversations } = useChatStore();
+  const user = useAuthStore((s) => s.user);
+  const setConversations = useChatStore((s) => s.setConversations);
 
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(conversation.name || "");

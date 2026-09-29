@@ -45,12 +45,28 @@ function publicKeyAt(userId: string, version: number, hint?: { publicKey?: strin
   return pending;
 }
 
-async function sharedKey(cacheKey: string, myKey: LocalKey, theirPublicKey: string): Promise<CryptoKey> {
+// Derivations in progress, by cache key. Opening a chat decrypts ~30 messages at once;
+// without this each one missed the cache and ran its own identical ECDH/unwrap.
+const inflightKeys = new Map<string, Promise<CryptoKey | null>>();
+function deriveOnce(cacheKey: string, derive: () => Promise<CryptoKey | null>): Promise<CryptoKey | null> {
   const cached = getCachedSessionKey(cacheKey);
-  if (cached) return cached;
-  const key = await deriveSessionKey(myKey.privateKey, theirPublicKey);
-  setCachedSessionKey(cacheKey, key);
-  return key;
+  if (cached) return Promise.resolve(cached);
+  let pending = inflightKeys.get(cacheKey);
+  if (!pending) {
+    pending = derive()
+      .then((key) => {
+        if (key) setCachedSessionKey(cacheKey, key);
+        return key;
+      })
+      .finally(() => inflightKeys.delete(cacheKey));
+    inflightKeys.set(cacheKey, pending);
+  }
+  return pending;
+}
+
+async function sharedKey(cacheKey: string, myKey: LocalKey, theirPublicKey: string): Promise<CryptoKey> {
+  const key = await deriveOnce(cacheKey, () => deriveSessionKey(myKey.privateKey, theirPublicKey));
+  return key as CryptoKey;
 }
 
 const canDecrypt = async (msg: Pick<Message, "ciphertext" | "iv">, key: CryptoKey) => {
@@ -163,11 +179,11 @@ export class ConversationCrypto {
   }
 
   // ── Group ──
-  private async groupKey(version: number): Promise<CryptoKey | null> {
-    const cacheKey = `group:${this.conversation._id}:${version}`;
-    const cached = getCachedSessionKey(cacheKey);
-    if (cached) return cached;
+  private groupKey(version: number): Promise<CryptoKey | null> {
+    return deriveOnce(`group:${this.conversation._id}:${version}`, () => this.unwrapGroupKeyVersion(version));
+  }
 
+  private async unwrapGroupKeyVersion(version: number): Promise<CryptoKey | null> {
     let key: CryptoKey | null = null;
     if (version === 0) {
       key = await this.legacyGroupKey();
@@ -195,7 +211,6 @@ export class ConversationCrypto {
       }
     }
 
-    if (key) setCachedSessionKey(cacheKey, key);
     return key;
   }
 

@@ -10,7 +10,7 @@ import { contentApi, endsInLabel, type PublicCampaign } from "@/lib/api/content.
 import { CampaignCarousel } from "@/components/customer/CampaignCarousel";
 import { CatalogCard } from "@/components/customer/CatalogCard";
 import { ConsultationDialog } from "@/components/customer/ConsultationDialog";
-import { cn } from "@/lib/utils";
+import { cn, sizedImage } from "@/lib/utils";
 import { extrasApi } from "@/lib/api/projectExtras.api";
 import { ProjectTimeline } from "@/components/customer/ProjectTimeline";
 import { AlertsPrompt } from "@/components/customer/AlertsPrompt";
@@ -196,7 +196,7 @@ export default function CustomerHomePage() {
                   <BeforeAfter before={w.beforeImage.url} after={w.images[0].url} alt={w.name} />
                 ) : w.images[0] ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={w.images[0].url} alt={w.name} className="aspect-[4/3] w-full rounded-xl object-cover" />
+                  <img src={sizedImage(w.images[0].url, 480)} loading="lazy" decoding="async" alt={w.name} className="aspect-[4/3] w-full rounded-xl object-cover" />
                 ) : null}
                 <Link href={`/home/catalog/${w.slug}`} className="block group">
                   <span className="block font-semibold text-white group-hover:text-violet-200">{w.name}</span>
@@ -234,7 +234,7 @@ export default function CustomerHomePage() {
                 <div className="flex items-center gap-2">
                   {t.photo?.url && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={t.photo.url} alt="" className="h-9 w-9 rounded-full object-cover" />
+                    <img src={sizedImage(t.photo.url, 36)} loading="lazy" decoding="async" alt="" className="h-9 w-9 rounded-full object-cover" />
                   )}
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-white truncate">{t.customerName}</p>

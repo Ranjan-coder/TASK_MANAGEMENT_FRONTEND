@@ -47,7 +47,7 @@ const inputClass =
 
 export default function SignupPage() {
   const router = useRouter();
-  const { setUser } = useAuthStore();
+  const setUser = useAuthStore((s) => s.setUser);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [phoneStep, setPhoneStep] = useState<PhoneVerificationStep | null>(null);

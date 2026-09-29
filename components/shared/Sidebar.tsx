@@ -33,9 +33,10 @@ import { cn } from "@/lib/utils";
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { user } = useAuthStore();
-  const { totalUnread } = useChatStore();
-  const { isMobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
+  const user = useAuthStore((s) => s.user);
+  const totalUnread = useChatStore((s) => s.totalUnread);
+  const isMobileSidebarOpen = useUIStore((s) => s.isMobileSidebarOpen);
+  const setMobileSidebarOpen = useUIStore((s) => s.setMobileSidebarOpen);
 
   const navItems = [
     // Customers and marketing have no access to tasks/dashboard (enforced by the API too)

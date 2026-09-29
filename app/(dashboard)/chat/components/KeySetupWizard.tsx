@@ -21,7 +21,7 @@ type Step = "loading" | "locked" | "ready" | "rotate_confirm" | "rotating";
  * fingerprint and lets the user replace their key if they think it was exposed.
  */
 export function KeySetupWizard({ onClose }: KeySetupWizardProps) {
-  const { user } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
   const [step, setStep] = useState<Step>("loading");
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [version, setVersion] = useState<number | null>(null);

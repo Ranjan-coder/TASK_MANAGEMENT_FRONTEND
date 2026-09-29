@@ -30,8 +30,8 @@ async function searchUsers(query: string) {
 
 export function GroupCreateModal({ onClose }: Props) {
   const router = useRouter();
-  const { user } = useAuthStore();
-  const { setConversations } = useChatStore();
+  const user = useAuthStore((s) => s.user);
+  const setConversations = useChatStore((s) => s.setConversations);
 
   const [name, setName] = useState("");
   const [search, setSearch] = useState("");

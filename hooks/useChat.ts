@@ -34,18 +34,16 @@ import { decryptTextWith } from "@/lib/crypto/conversationKeys";
 export const CHAT_KEYS_UPDATED_EVENT = "chat:keys-updated";
 export const useChat = () => {
   const socket = getSocket();
-  const { user } = useAuthStore();
-  const {
-    appendMessage,
-    updateMessage,
-    removeMessage,
-    hideMessageForMe,
-    upsertConversation,
-    handleTyping,
-    handlePresence,
-    markConversationRead,
-    activeConversationId
-  } = useChatStore();
+  const user = useAuthStore((s) => s.user);
+  const appendMessage = useChatStore((s) => s.appendMessage);
+  const updateMessage = useChatStore((s) => s.updateMessage);
+  const removeMessage = useChatStore((s) => s.removeMessage);
+  const hideMessageForMe = useChatStore((s) => s.hideMessageForMe);
+  const upsertConversation = useChatStore((s) => s.upsertConversation);
+  const handleTyping = useChatStore((s) => s.handleTyping);
+  const handlePresence = useChatStore((s) => s.handlePresence);
+  const markConversationRead = useChatStore((s) => s.markConversationRead);
+  const activeConversationId = useChatStore((s) => s.activeConversationId);
 
   const activeConvRef = useRef<string | null>(null);
   activeConvRef.current = activeConversationId;

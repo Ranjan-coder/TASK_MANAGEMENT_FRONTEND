@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useChatStore } from "@/store/chatStore";
 import { useAuthStore } from "@/store/authStore";
@@ -31,7 +31,7 @@ import { ChatUnlock } from "../components/ChatUnlock";
 import { SafetyNumbersDialog } from "../components/SafetyNumbersDialog";
 import { ProjectChatActions, RatingPrompt } from "../components/ProjectChatActions";
 import { useProjectApprovals, useProjectStage, ApprovalCard, RequestApprovalDialog } from "../components/ProjectWorkflow";
-import { extrasApi, stageLabel, type Timeline } from "@/lib/api/projectExtras.api";
+import { extrasApi, stageLabel, type Timeline, type DesignApproval } from "@/lib/api/projectExtras.api";
 import { useOffensiveConfirm, ModerationWarningPopup } from "../components/ModerationUI";
 import { checkMessage, recordPrevented, loadLexicon } from "@/lib/moderation/lexicon";
 import { EditCancelledError, type ModerationFlag } from "@/lib/crypto/conversationKeys";
@@ -40,21 +40,114 @@ import { cn } from "@/lib/utils";
 import { ArrowLeft, Users, Lock, Info, ShieldCheck, ShieldAlert, Key } from "lucide-react";
 import { toast } from "sonner";
 
+const NO_MESSAGES: Message[] = [];
+
+// Conversations fully loaded by this page during this visit. Reopening one shows the
+// cached (already decrypted) messages at once and refreshes quietly in the background.
+const loadedThisSession = new Set<string>();
+const convCache = new Map<string, Conversation>();
+
+/** Reuse an earlier decryption when the server copy hasn't changed (same ciphertext). */
+function reuseDecrypted(server: Message, cached?: Message): Message | null {
+  if (!cached || cached.decryptionFailed || cached.decryptedContent === undefined) return null;
+  if (cached.ciphertext !== server.ciphertext || cached.iv !== server.iv || cached.isDeleted !== server.isDeleted) return null;
+  return {
+    ...server, // fresh reactions, read state, edit flags …
+    decryptedContent: cached.decryptedContent,
+    cryptoKey: cached.cryptoKey,
+    frankingKey: cached.frankingKey,
+    frankVerified: cached.frankVerified
+  };
+}
+
+/** Stable callbacks for message rows (they read the latest handlers through a ref). */
+interface RowActions {
+  react: (id: string, emoji: string) => void;
+  del: (id: string, scope: "me" | "everyone") => void;
+  reply: (msg: Message) => void;
+  edit: (id: string, encrypted: EncryptedText) => Promise<void>;
+  requestApproval: (msg: Message) => void;
+  putApproval: (a: DesignApproval) => void;
+}
+
+/**
+ * One message row. Memoized: a typing, presence or reaction event elsewhere no longer
+ * re-renders every bubble in the history — only rows whose props actually changed.
+ */
+const MessageRow = memo(function MessageRow({
+  msg,
+  prevMessage,
+  isMine,
+  showUnreadMarker,
+  unreadDividerRef,
+  encryptFn,
+  actions,
+  approval,
+  canRequestApproval,
+  canDecide,
+  canWithdraw,
+  lazy
+}: {
+  lazy: boolean;
+  msg: Message;
+  prevMessage?: Message;
+  isMine: boolean;
+  showUnreadMarker: boolean;
+  unreadDividerRef: React.RefObject<HTMLDivElement | null>;
+  encryptFn: (text: string) => Promise<EncryptedText>;
+  actions: RowActions;
+  approval?: DesignApproval;
+  canRequestApproval: boolean;
+  canDecide: boolean;
+  canWithdraw: boolean;
+}) {
+  return (
+    // Older rows skip layout and paint while off screen (see .chat-row-lazy in globals.css)
+    <div className={lazy ? "chat-row-lazy" : undefined}>
+      {showUnreadMarker && (
+        <div ref={unreadDividerRef} className="flex items-center gap-3 py-3">
+          <div className="flex-1 h-px bg-rose-500/30" />
+          <span className="text-[10px] text-rose-400 font-semibold uppercase tracking-wider shrink-0">
+            New messages
+          </span>
+          <div className="flex-1 h-px bg-rose-500/30" />
+        </div>
+      )}
+      <MessageBubble
+        message={msg}
+        isMine={isMine}
+        prevMessage={prevMessage}
+        sessionKey={msg.cryptoKey ?? null}
+        onReact={(emoji) => actions.react(msg._id, emoji)}
+        onDelete={(scope) => actions.del(msg._id, scope)}
+        onReply={() => actions.reply(msg)}
+        onEdit={isMine ? (encrypted) => actions.edit(msg._id, encrypted) : undefined}
+        encryptFn={encryptFn}
+        onRequestApproval={canRequestApproval ? () => actions.requestApproval(msg) : undefined}
+        footer={
+          approval ? (
+            <ApprovalCard approval={approval} canDecide={canDecide} canWithdraw={canWithdraw} onChange={actions.putApproval} />
+          ) : undefined
+        }
+      />
+    </div>
+  );
+});
+
 export default function ConversationPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const router = useRouter();
-  const { user } = useAuthStore();
-  const {
-    messages,
-    setMessages,
-    prependMessages,
-    updateMessage,
-    setActiveConversation,
-    markConversationRead,
-    conversations,
-    typingUsers,
-    onlineUsers
-  } = useChatStore();
+  const user = useAuthStore((s) => s.user);
+  // Narrow subscriptions: only this conversation's messages/typing, not the whole store
+  // (the whole-store read re-rendered this page on every event in every chat).
+  const convMessages = useChatStore((s) => s.messages[conversationId]) ?? NO_MESSAGES;
+  const typing = useChatStore((s) => s.typingUsers[conversationId]);
+  const onlineUsers = useChatStore((s) => s.onlineUsers);
+  const setMessages = useChatStore((s) => s.setMessages);
+  const prependMessages = useChatStore((s) => s.prependMessages);
+  const updateMessage = useChatStore((s) => s.updateMessage);
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
+  const markConversationRead = useChatStore((s) => s.markConversationRead);
 
   const [conv, setConv] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,8 +174,6 @@ export default function ConversationPage() {
   useJoinConversation(conversationId);
   const sendTyping = useSendTyping(conversationId);
 
-  const convMessages = messages[conversationId] || [];
-  const typing = typingUsers[conversationId];
   const typingNames = typing ? Array.from(typing) : [];
 
   // ── Build conversation crypto ───────────────────────────────────────────────
@@ -104,8 +195,11 @@ export default function ConversationPage() {
 
   // ── Decrypt all messages ────────────────────────────────────────────────────
   const decryptAll = useCallback(
-    async (msgs: Message[], c: ConversationCrypto | null): Promise<Message[]> =>
-      c ? Promise.all(msgs.map((m) => c.decrypt(m))) : msgs,
+    async (msgs: Message[], c: ConversationCrypto | null, cached: Message[] = []): Promise<Message[]> => {
+      if (!c) return msgs;
+      const byId = new Map(cached.map((m) => [m._id, m]));
+      return Promise.all(msgs.map((m) => reuseDecrypted(m, byId.get(m._id)) ?? c.decrypt(m)));
+    },
     []
   );
 
@@ -121,21 +215,33 @@ export default function ConversationPage() {
     setShowFileUpload(false);
     setUnreadMarkerId(null);
 
+    // Reopening a chat seen earlier in this visit: show what we have immediately
+    const cached = useChatStore.getState().messages[conversationId] || [];
+    const cachedConv = convCache.get(conversationId);
+    const quick = loadedThisSession.has(conversationId) && cached.length > 0 && Boolean(cachedConv);
+    if (quick) {
+      setConv(cachedConv!);
+      setLoading(false);
+    }
+
     (async () => {
-      setLoading(true);
+      if (!quick) setLoading(true);
       try {
         const [convData, msgData] = await Promise.all([
           fetchConversation(conversationId),
           fetchMessages(conversationId)
         ]);
         setConv(convData);
+        convCache.set(conversationId, convData);
 
         const c = await buildCrypto(convData);
         setConvCrypto(c);
         setSendKey(c ? await c.sendKey() : null);
 
-        const decrypted = await decryptAll(msgData.messages, c);
+        // Only new or changed messages are decrypted again
+        const decrypted = await decryptAll(msgData.messages, c, useChatStore.getState().messages[conversationId] || []);
         setMessages(conversationId, decrypted);
+        loadedThisSession.add(conversationId);
         setHasMore(msgData.hasMore);
         setNextCursor(msgData.nextCursor);
         setUnreadMarkerId(msgData.unreadMarkerId);
@@ -344,7 +450,7 @@ export default function ConversationPage() {
       const { ciphertext, iv, keyRef, franking, moderation } = encrypted;
       await editMessage(msgId, ciphertext, iv, keyRef, franking, moderation);
       // Optimistically update store with decrypted content
-      const msgs = messages[conversationId] || [];
+      const msgs = useChatStore.getState().messages[conversationId] || [];
       const msg = msgs.find((m) => m._id === msgId);
       if (msg && sendKey) {
         try {
@@ -363,13 +469,13 @@ export default function ConversationPage() {
         } catch {}
       }
     },
-    [conversationId, messages, sendKey, updateMessage]
+    [conversationId, sendKey, updateMessage]
   );
 
   // ── Delete message ──────────────────────────────────────────────────────────
   const handleDelete = useCallback(
     async (msgId: string, scope: "me" | "everyone") => {
-      const msgs = messages[conversationId] || [];
+      const msgs = useChatStore.getState().messages[conversationId] || [];
       const original = msgs.find((m) => m._id === msgId);
       if (!original) return;
 
@@ -396,7 +502,7 @@ export default function ConversationPage() {
         toast.error(err?.response?.data?.message || "Failed to delete message");
       }
     },
-    [conversationId, messages, updateMessage]
+    [conversationId, updateMessage]
   );
 
   // ── Encrypt helper (passed to MessageBubble for edit) ───────────────────────
@@ -418,6 +524,28 @@ export default function ConversationPage() {
       return { ...(await encryptTextWith(sendKey, text)), moderation };
     },
     [sendKey, conv, confirmOffensive]
+  );
+
+  // Latest handlers behind a ref, so the memoized rows get callbacks that never change
+  const actionsRef = useRef<RowActions>(null!);
+  actionsRef.current = {
+    react: (id, emoji) => reactToMessage(id, emoji),
+    del: handleDelete,
+    reply: setReplyTo,
+    edit: handleEdit,
+    requestApproval: setApprovalTarget,
+    putApproval
+  };
+  const rowActions = useMemo<RowActions>(
+    () => ({
+      react: (id, emoji) => actionsRef.current.react(id, emoji),
+      del: (id, scope) => actionsRef.current.del(id, scope),
+      reply: (msg) => actionsRef.current.reply(msg),
+      edit: (id, enc) => actionsRef.current.edit(id, enc),
+      requestApproval: (msg) => actionsRef.current.requestApproval(msg),
+      putApproval: (a) => actionsRef.current.putApproval(a)
+    }),
+    []
   );
 
   // ── Header helpers ──────────────────────────────────────────────────────────
@@ -612,46 +740,29 @@ export default function ConversationPage() {
             </div>
           )}
 
-          {convMessages.map((msg, idx) => (
-            <div key={msg._id}>
-              {msg._id === unreadMarkerId && (
-                <div ref={unreadDividerRef} className="flex items-center gap-3 py-3">
-                  <div className="flex-1 h-px bg-rose-500/30" />
-                  <span className="text-[10px] text-rose-400 font-semibold uppercase tracking-wider shrink-0">
-                    New messages
-                  </span>
-                  <div className="flex-1 h-px bg-rose-500/30" />
-                </div>
-              )}
-              <MessageBubble
-                message={msg}
-                isMine={msg.sender._id === user?._id}
+          {convMessages.map((msg, idx) => {
+            const approval = approvalFor(msg._id);
+            return (
+              <MessageRow
+                key={msg._id}
+                msg={msg}
                 prevMessage={convMessages[idx - 1]}
-                sessionKey={msg.cryptoKey ?? null}
-                onReact={(emoji) => reactToMessage(msg._id, emoji)}
-                onDelete={(scope) => handleDelete(msg._id, scope)}
-                onReply={() => setReplyTo(msg)}
-                onEdit={msg.sender._id === user?._id ? (encrypted) => handleEdit(msg._id, encrypted) : undefined}
+                isMine={msg.sender._id === user?._id}
+                showUnreadMarker={msg._id === unreadMarkerId}
+                unreadDividerRef={unreadDividerRef}
                 encryptFn={encryptFn}
-                onRequestApproval={
-                  conv?.project && !isCustomer && ["image", "file"].includes(msg.type) && !msg.isDeleted &&
-                  (!approvalFor(msg._id) || approvalFor(msg._id)!.status === "withdrawn")
-                    ? () => setApprovalTarget(msg)
-                    : undefined
+                actions={rowActions}
+                approval={approval}
+                canRequestApproval={
+                  Boolean(conv?.project) && !isCustomer && ["image", "file"].includes(msg.type) && !msg.isDeleted &&
+                  (!approval || approval.status === "withdrawn")
                 }
-                footer={
-                  approvalFor(msg._id) ? (
-                    <ApprovalCard
-                      approval={approvalFor(msg._id)!}
-                      canDecide={isCustomer}
-                      canWithdraw={!isCustomer && (approvalFor(msg._id)!.requestedBy?._id === user?._id || isTeamLead)}
-                      onChange={putApproval}
-                    />
-                  ) : undefined
-                }
+                canDecide={isCustomer}
+                canWithdraw={Boolean(approval) && !isCustomer && (approval!.requestedBy?._id === user?._id || isTeamLead)}
+                lazy={idx < convMessages.length - 40}
               />
-            </div>
-          ))}
+            );
+          })}
 
           {/* Typing indicator */}
           {typingNames.length > 0 && (

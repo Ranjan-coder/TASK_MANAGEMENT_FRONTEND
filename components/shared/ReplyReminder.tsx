@@ -56,16 +56,23 @@ export function ReplyReminderPopup() {
     socket.on("sla:reminder", onReminder);
     socket.on("sla:resolved", onResolved);
     socket.on("sla:snoozed", onSnoozed);
-    const tick = setInterval(() => setNow(Date.now()), 20_000);
     return () => {
       socket.off("connect", load);
       socket.off("sla:reminder", onReminder);
       socket.off("sla:resolved", onResolved);
       socket.off("sla:snoozed", onSnoozed);
-      clearInterval(tick);
     };
   }, [load]);
 
+
+  // Re-check snoozed/hidden reminders every 20 s, but only while there are any
+  // (this used to re-render the whole app shell every 20 s for everyone).
+  const hasReminders = reminders.length > 0;
+  useEffect(() => {
+    if (!hasReminders) return;
+    const tick = setInterval(() => setNow(Date.now()), 20_000);
+    return () => clearInterval(tick);
+  }, [hasReminders]);
   const visible = reminders.filter(
     (r) => !((hiddenUntil[r.slaId] ?? 0) > now) && pathname !== `/chat/${r.conversationId}`
   );

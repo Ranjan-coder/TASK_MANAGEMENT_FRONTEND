@@ -15,8 +15,12 @@ export function useNotifications() {
   const router = useRouter();
   const routerRef = useRef(router);
   routerRef.current = router;
-  const { notifications, unreadCount, setNotifications, addNotification, markAsRead, markAllAsRead } =
-    useNotificationStore();
+  const notifications = useNotificationStore((s) => s.notifications);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const setNotifications = useNotificationStore((s) => s.setNotifications);
+  const addNotification = useNotificationStore((s) => s.addNotification);
+  const markAsRead = useNotificationStore((s) => s.markAsRead);
+  const markAllAsRead = useNotificationStore((s) => s.markAllAsRead);
 
   const query = useQuery({
     queryKey: ["notifications"],

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Phone, MessageCircle, ExternalLink, CalendarCheck, Clock } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, sizedImage } from "@/lib/utils";
 import { ctaDefaultLabel, ctaHref, endsInLabel, type CampaignCta, type PublicCampaign } from "@/lib/api/content.api";
 
 interface Props {
@@ -69,7 +69,8 @@ export function CampaignSlide({ campaign, active = true, onCta, onVideoEnded, cl
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={campaign.media.url}
+            src={sizedImage(campaign.media.url, 1200)}
+            decoding="async"
             alt={campaign.title}
             loading={active ? "eager" : "lazy"}
             className="absolute inset-0 h-full w-full object-cover"

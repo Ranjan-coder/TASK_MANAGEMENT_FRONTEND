@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { sizedImage } from "@/lib/utils";
 import { ImageIcon } from "lucide-react";
 import { formatPrice, type CatalogItem } from "@/lib/api/content.api";
 
@@ -15,7 +16,7 @@ export function CatalogCard({ item }: { item: CatalogItem }) {
       <div className="relative aspect-[4/3] bg-slate-800">
         {cover ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={cover.url} alt="" loading="lazy" className="h-full w-full object-cover group-hover:scale-[1.02] transition-transform duration-300" />
+          <img src={sizedImage(cover.url, 400)} decoding="async" alt="" loading="lazy" className="h-full w-full object-cover group-hover:scale-[1.02] transition-transform duration-300" />
         ) : (
           <div className="h-full w-full flex items-center justify-center text-slate-600">
             <ImageIcon className="h-8 w-8" />

@@ -15,8 +15,8 @@ import { cn } from "@/lib/utils";
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user } = useAuthStore();
-  const { setConversations } = useChatStore();
+  const user = useAuthStore((s) => s.user);
+  const setConversations = useChatStore((s) => s.setConversations);
   // Keys are synced at sign-in; "locked" means this browser has no copy yet
   const [keysLocked, setKeysLocked] = useState(false);
   const [showUnlockModal, setShowUnlockModal] = useState(false);

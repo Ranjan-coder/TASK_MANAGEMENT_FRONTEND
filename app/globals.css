@@ -87,3 +87,16 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   [aria-label="Payment receipt"] { position: absolute; inset: 0 auto auto 0; width: 100%; }
   body { background: #fff !important; }
 }
+
+/* Long chat histories: older message rows skip layout and paint while off screen
+   (a light stand-in for list virtualisation; scroll-to-bottom and "load older" keep
+   working). Paint containment would clip the hover action bar above a bubble, so it's
+   switched off while a row is hovered, tapped or focused. */
+.chat-row-lazy {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
+}
+.chat-row-lazy:hover,
+.chat-row-lazy:focus-within {
+  content-visibility: visible;
+}
