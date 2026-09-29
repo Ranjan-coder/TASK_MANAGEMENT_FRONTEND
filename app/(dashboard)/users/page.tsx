@@ -11,7 +11,9 @@ import Link from "next/link";
 const ROLE_BADGE: Record<string, string> = {
   superadmin: "bg-violet-500/20 text-violet-300 border-violet-500/30",
   admin: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  user: "bg-slate-500/20 text-slate-300 border-slate-500/30"
+  marketing: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  user: "bg-slate-500/20 text-slate-300 border-slate-500/30",
+  customer: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
 };
 
 const STATUS_BADGE: Record<string, string> = {
@@ -92,7 +94,9 @@ export default function UsersPage() {
           <option value="">All Roles</option>
           <option value="superadmin">Super Admin</option>
           <option value="admin">Admin</option>
+          <option value="marketing">Marketing</option>
           <option value="user">User</option>
+          <option value="customer">Customer</option>
         </select>
         <select
           value={statusFilter}
@@ -166,7 +170,7 @@ export default function UsersPage() {
                         <button
                           onClick={() => statusMutation.mutate({ id: u._id, status: "suspended" })}
                           className="text-xs text-red-400 hover:text-red-300 transition-colors"
-                          disabled={!isSuperAdmin && u.role !== "user"}
+                          disabled={!isSuperAdmin && !["user", "marketing", "customer"].includes(u.role)}
                         >
                           Suspend
                         </button>
@@ -222,6 +226,8 @@ export default function UsersPage() {
                     className="w-full px-3 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600 text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
                   >
                     <option value="user">User</option>
+                    <option value="marketing">Marketing</option>
+                    <option value="customer">Customer</option>
                     {isSuperAdmin && <option value="admin">Admin</option>}
                     {isSuperAdmin && <option value="superadmin">Super Admin</option>}
                   </select>

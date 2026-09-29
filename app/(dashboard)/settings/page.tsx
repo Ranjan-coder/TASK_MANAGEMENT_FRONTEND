@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "../../../store/authStore";
 import { usersApi } from "../../../lib/api/users.api";
@@ -17,15 +17,25 @@ import {
   CheckCircle2,
   Sparkles,
   Camera,
-  Key
+  Key,
+  Flag,
+  BellRing,
+  ShieldCheck
 } from "lucide-react";
 import { KeySetupWizard } from "../chat/components/KeySetupWizard";
+import { LeaveStatus } from "@/components/shared/LeaveStatus";
+import { ReportsSection } from "@/components/shared/ReportsSection";
+import { NotificationsSection } from "@/components/shared/NotificationsSection";
+import { PrivacySection } from "@/components/shared/PrivacySection";
+import { prepareCurrentPassword, prepareNewPassword, finishSignIn } from "../../../lib/auth/credentials";
+import { resealBundleForNewPassword, WrongPasswordError } from "../../../lib/crypto/keyBundle";
+import { passwordPolicyError } from "../../../lib/crypto/passwordKeys";
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
 
-  const [activeSection, setActiveSection] = useState<"profile" | "security" | "sessions" | "encryption">("profile");
+  const [activeSection, setActiveSection] = useState<"profile" | "security" | "sessions" | "encryption" | "reports" | "notifications" | "privacy">("profile");
   const [profileForm, setProfileForm] = useState({
     name: user?.name ?? "",
     department: user?.department ?? "",
@@ -38,8 +48,80 @@ export default function SettingsPage() {
   const [pwForm, setPwForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [msg, setMsg] = useState({ text: "", type: "" });
 
+  // Deep link: /settings?section=security (used for forced password changes)
+  useEffect(() => {
+    const section = new URLSearchParams(window.location.search).get("section");
+    if (section === "security" || section === "sessions" || section === "encryption" || section === "profile" || section === "reports" || section === "notifications" || section === "privacy") {
+      setActiveSection(section);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user?.mustChangePassword) setActiveSection("security");
+  }, [user?.mustChangePassword]);
+
+  const passwordMutation = useMutation({
+    mutationFn: async () => {
+      // Passwords never leave the browser: derive keys for the old and new one,
+      // and re-encrypt the chat key bundle for the new password in the same request.
+      const current = await prepareCurrentPassword(pwForm.currentPassword);
+      const next = await prepareNewPassword(pwForm.newPassword);
+      let keyBundle: { ciphertext: string; iv: string } | undefined;
+      if (!current.legacy) {
+        try {
+          keyBundle = await resealBundleForNewPassword(current.wrapKey, next.wrapKey);
+        } catch (err) {
+          if (err instanceof WrongPasswordError) throw new Error("Current password is incorrect");
+          throw err;
+        }
+      }
+      const res = await authApi.changePassword({
+        ...(current.legacy ? { currentPassword: current.password } : { currentAuthKey: current.authKey }),
+        newAuthKey: next.authKey,
+        newKdfSalt: next.kdfSalt,
+        ...(keyBundle ? { keyBundle } : {})
+      });
+      return { res, wrapKey: next.wrapKey };
+    },
+    onSuccess: async ({ res, wrapKey }) => {
+      setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      const updated = res.data?.data?.user;
+      if (updated) {
+        setUser(updated);
+        // Cache the new wrapKey here; creates chat keys if this is the first real password
+        await finishSignIn(updated._id, wrapKey);
+      }
+      toast.success("Password changed. Other devices have been signed out.");
+    },
+    onError: (err: any) => {
+      const details = err?.response?.data?.errors;
+      const detail = Array.isArray(details) && details[0]?.message;
+      toast.error(detail || err?.response?.data?.message || err?.message || "Could not change password.");
+    }
+  });
+
+  const handleChangePassword = () => {
+    if (!pwForm.currentPassword || !pwForm.newPassword) {
+      toast.error("Enter your current and new password.");
+      return;
+    }
+    const policyError = passwordPolicyError(pwForm.newPassword);
+    if (policyError) {
+      toast.error(policyError);
+      return;
+    }
+    if (pwForm.newPassword !== pwForm.confirmPassword) {
+      toast.error("New passwords do not match.");
+      return;
+    }
+    passwordMutation.mutate();
+  };
+
   const profileMutation = useMutation({
-    mutationFn: () => usersApi.updateProfile(profileForm),
+    mutationFn: () =>
+      usersApi.updateProfile(
+        user?.role === "customer" ? { name: profileForm.name, avatarUrl: profileForm.avatarUrl } : profileForm
+      ),
     onSuccess: (r) => {
       setUser(r.data.data);
       toast.success("Profile updated successfully!");
@@ -109,23 +191,37 @@ export default function SettingsPage() {
   const revokeSessionMutation = useMutation({
     mutationFn: (sessionId: string) => authApi.revokeSession(sessionId),
     onSuccess: () => {
-      toast.success("Session revoked");
+      toast.success("Device signed out");
       refetchSessions();
-    }
+    },
+    onError: () => toast.error("Couldn't sign out that device")
+  });
+
+  const revokeOthersMutation = useMutation({
+    mutationFn: () => authApi.revokeOtherSessions(),
+    onSuccess: (r) => {
+      const n = r.data?.data?.signedOut ?? 0;
+      toast.success(n === 1 ? "1 other device signed out" : `${n} other devices signed out`);
+      refetchSessions();
+    },
+    onError: () => toast.error("Couldn't sign out other devices")
   });
 
   const sections = [
     { id: "profile", label: "Profile & Avatar", icon: User },
     { id: "security", label: "Security", icon: Shield },
-    { id: "sessions", label: "Active Sessions", icon: Laptop },
-    { id: "encryption", label: "Chat Encryption", icon: Key }
+    { id: "sessions", label: "Devices", icon: Laptop },
+    { id: "encryption", label: "Chat Encryption", icon: Key },
+    ...(user && user.role !== "marketing" ? [{ id: "reports", label: "Reports", icon: Flag }] : []),
+    { id: "notifications", label: "Notifications", icon: BellRing },
+    { id: "privacy", label: "Privacy & data", icon: ShieldCheck }
   ];
 
   return (
     <div className="max-w-4xl space-y-6 pb-20">
       <div>
         <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
-        <p className="text-slate-400 text-xs mt-1">Manage your account profile, avatar, security and active sessions</p>
+        <p className="text-slate-400 text-xs mt-1">Manage your profile, security, signed-in devices and chat encryption</p>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-6">
@@ -290,6 +386,17 @@ export default function SettingsPage() {
                     />
                   </div>
 
+                  {user?.role === "customer" ? (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1.5">Mobile Number</label>
+                    <input
+                      disabled
+                      value={user?.phone ? `${user.phone.replace(/^\+91/, "+91 ")}${user.phoneVerified ? " (verified)" : ""}` : "Not added"}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/40 border border-slate-800 text-slate-500 text-xs font-medium cursor-not-allowed"
+                    />
+                  </div>
+                  ) : (
+                  <>
                   <div>
                     <label className="block text-xs font-medium text-slate-400 mb-1.5">Department</label>
                     <input
@@ -311,6 +418,8 @@ export default function SettingsPage() {
                       className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition text-xs font-medium"
                     />
                   </div>
+                  </>
+                  )}
                 </div>
 
                 <div className="pt-2">
@@ -334,12 +443,19 @@ export default function SettingsPage() {
                   </button>
                 </div>
               </div>
+
+              {user && ["superadmin", "admin", "user"].includes(user.role) && <LeaveStatus />}
             </div>
           )}
 
           {activeSection === "security" && (
             <div className="space-y-5">
               <h2 className="text-base font-semibold text-white">Security Settings</h2>
+              {user?.mustChangePassword && (
+                <div role="alert" className="p-3.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
+                  For your security, set a new password before using the rest of the app. Then turn on two-factor authentication.
+                </div>
+              )}
               <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800">
                 <div className="flex items-center justify-between">
                   <div>
@@ -369,6 +485,7 @@ export default function SettingsPage() {
                       <input
                         id={`settings-${field}`}
                         type="password"
+                        autoComplete={field === "currentPassword" ? "current-password" : "new-password"}
                         value={pwForm[field as keyof typeof pwForm]}
                         onChange={(e) => setPwForm((f) => ({ ...f, [field]: e.target.value }))}
                         className="w-full px-3.5 py-2 rounded-xl bg-slate-950/60 border border-slate-800 text-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition text-xs"
@@ -378,12 +495,11 @@ export default function SettingsPage() {
                 </div>
                 <button
                   id="change-password"
-                  className="mt-4 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs transition"
-                  onClick={() =>
-                    toast.info("Password update feature is verified and connected to auth services.")
-                  }
+                  className="mt-4 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs transition disabled:opacity-60"
+                  onClick={handleChangePassword}
+                  disabled={passwordMutation.isPending}
                 >
-                  Update Password
+                  {passwordMutation.isPending ? "Updating..." : "Update Password"}
                 </button>
               </div>
             </div>
@@ -391,45 +507,93 @@ export default function SettingsPage() {
 
           {activeSection === "sessions" && (
             <div className="space-y-4">
-              <h2 className="text-base font-semibold text-white">Active Sessions</h2>
-              <p className="text-slate-400 text-xs">These devices and locations are currently logged in to your account.</p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-white">Devices</h2>
+                  <p className="text-slate-400 text-xs mt-0.5">
+                    Devices signed in to your account. Signing a device out ends its session immediately and removes its
+                    copy of your chat keys the next time it's used.
+                  </p>
+                </div>
+                {sessions && sessions.length > 1 && (
+                  <button
+                    onClick={() => revokeOthersMutation.mutate()}
+                    disabled={revokeOthersMutation.isPending}
+                    className="px-3 py-1.5 rounded-lg border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 text-xs font-medium transition disabled:opacity-60"
+                  >
+                    Sign out all other devices
+                  </button>
+                )}
+              </div>
 
               {!sessions || sessions.length === 0 ? (
-                <p className="text-slate-500 text-xs py-4 text-center">No active sessions found.</p>
+                <p className="text-slate-500 text-xs py-4 text-center">No signed-in devices found.</p>
               ) : (
-                <div className="space-y-2.5">
-                  {sessions.map((s: { sessionId: string; device: string; ipAddress: string; lastActive: string }) => (
-                    <div
-                      key={s.sessionId}
-                      className="flex items-start justify-between p-3.5 rounded-xl border border-slate-800 bg-slate-950/50"
-                    >
-                      <div>
-                        <p className="text-slate-200 text-xs font-medium">💻 {s.device || "Unknown Device"}</p>
-                        <p className="text-slate-500 text-[11px] mt-0.5">IP: {s.ipAddress}</p>
-                        <p className="text-slate-600 text-[10px] mt-0.5">
-                          Last active: {new Date(s.lastActive).toLocaleString()}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => revokeSessionMutation.mutate(s.sessionId)}
-                        disabled={revokeSessionMutation.isPending}
-                        className="text-xs text-rose-400 hover:text-rose-300 transition"
+                <ul className="space-y-2.5">
+                  {sessions.map(
+                    (d: {
+                      sessionId: string;
+                      deviceName: string;
+                      ipAddress: string;
+                      lastActive: string;
+                      createdAt: string;
+                      trusted: boolean;
+                      current: boolean;
+                    }) => (
+                      <li
+                        key={d.sessionId}
+                        className="flex items-start justify-between gap-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/50"
                       >
-                        Revoke
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                        <div className="flex items-start gap-3 min-w-0">
+                          <Laptop className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-slate-200 text-xs font-medium flex flex-wrap items-center gap-2">
+                              {d.deviceName}
+                              {d.current && (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold">
+                                  This device
+                                </span>
+                              )}
+                              {!d.trusted && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]">
+                                  Not remembered
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-slate-500 text-[11px] mt-0.5">IP {d.ipAddress}</p>
+                            <p className="text-slate-600 text-[10px] mt-0.5">
+                              Signed in {new Date(d.createdAt).toLocaleDateString()} · Last active{" "}
+                              {new Date(d.lastActive).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        {!d.current && (
+                          <button
+                            onClick={() => revokeSessionMutation.mutate(d.sessionId)}
+                            disabled={revokeSessionMutation.isPending}
+                            className="text-xs text-rose-400 hover:text-rose-300 transition shrink-0"
+                          >
+                            Sign out
+                          </button>
+                        )}
+                      </li>
+                    )
+                  )}
+                </ul>
               )}
             </div>
           )}
+
+          {activeSection === "reports" && <ReportsSection />}
+          {activeSection === "notifications" && <NotificationsSection />}
+          {activeSection === "privacy" && <PrivacySection />}
 
           {activeSection === "encryption" && (
             <div className="space-y-5">
               <div>
                 <h2 className="text-base font-semibold text-white">End-to-End Chat Encryption</h2>
                 <p className="text-slate-400 text-xs mt-0.5">
-                  Your chat messages are encrypted and decrypted directly in your browser using ECDH P-256 + AES-256-GCM.
+                  Messages are encrypted in your browser. Your keys sync to every device you sign in on, protected by your password.
                 </p>
               </div>
 

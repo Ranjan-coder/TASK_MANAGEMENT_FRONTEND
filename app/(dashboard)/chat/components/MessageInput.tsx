@@ -4,16 +4,20 @@ import { useRef, useCallback, KeyboardEvent, useState } from "react";
 import { Send, Paperclip, Smile, X, Reply } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmojiPicker } from "./EmojiPicker";
+import { QuickReplyButton } from "./QuickReplies";
 import { Message } from "@/types/chat";
 
 interface MessageInputProps {
-  onSend: (text: string) => Promise<void> | void;
+  /** Return false to keep the text in the box (e.g. the sender cancelled at the "Send anyway?" prompt). */
+  onSend: (text: string) => Promise<void | boolean> | void | boolean;
   onTyping?: () => void;
   onAttachClick?: () => void;
   disabled?: boolean;
   placeholder?: string;
   replyTo?: Message | null;
   onCancelReply?: () => void;
+  /** Staff: show quick-reply templates; fills {customer}/{designer} placeholders */
+  quickReplyFill?: (text: string) => string;
 }
 
 export function MessageInput({
@@ -23,7 +27,8 @@ export function MessageInput({
   disabled,
   placeholder,
   replyTo,
-  onCancelReply
+  onCancelReply,
+  quickReplyFill
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showEmoji, setShowEmoji] = useState(false);
@@ -43,7 +48,12 @@ export function MessageInput({
     if (!text || disabled) return;
     el.value = "";
     el.style.height = "auto";
-    await onSend(text);
+    const sent = await onSend(text);
+    if (sent === false && textareaRef.current) {
+      textareaRef.current.value = text;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+      textareaRef.current.focus();
+    }
   }, [onSend, disabled]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -107,6 +117,22 @@ export function MessageInput({
           >
             <Paperclip className="h-4 w-4" />
           </button>
+
+          {quickReplyFill && (
+            <QuickReplyButton
+              disabled={disabled}
+              fill={quickReplyFill}
+              currentText={() => textareaRef.current?.value ?? ""}
+              onPick={(text) => {
+                const el = textareaRef.current;
+                if (!el) return;
+                el.value = text;
+                el.focus();
+                el.selectionStart = el.selectionEnd = text.length;
+                handleInput();
+              }}
+            />
+          )}
 
           {/* Text area */}
           <textarea

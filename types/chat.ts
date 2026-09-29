@@ -30,6 +30,36 @@ export interface Reaction {
   users: string[]; // userIds
 }
 
+// ── Encryption keys ───────────────────────────────────────────────────────────
+
+/** Which key encrypted a message: g = group key version; s/r = sender/recipient key versions (DMs). */
+export interface KeyRef {
+  g?: number;
+  s?: number;
+  r?: number;
+}
+
+export interface WrappedGroupKey {
+  wrapped: string;
+  wrappedBy: string;
+  wrapperKeyVersion: number;
+  recipientKeyVersion: number;
+}
+
+export interface GroupKeyVersion {
+  version: number;
+  createdBy?: string;
+  createdAt?: string;
+  keys: Record<string, WrappedGroupKey>;
+}
+
+/** Entry sent when creating/rotating/sharing group keys. */
+export interface WrappedKeyInput {
+  wrapped: string;
+  wrapperKeyVersion: number;
+  recipientKeyVersion: number;
+}
+
 // ── Message ───────────────────────────────────────────────────────────────────
 
 export interface Message {
@@ -40,9 +70,16 @@ export interface Message {
   // E2E fields — client decrypts these; never displayed raw
   ciphertext?: string;
   iv?: string;
+  keyRef?: KeyRef;
+  // Key that decrypted this message (client-only; used for its attachments)
+  cryptoKey?: CryptoKey;
   // Decrypted plaintext — computed client-side, never stored on server
   decryptedContent?: string;
   decryptionFailed?: boolean;
+  // Message franking: commitment from the server; key + check result client-side only
+  franking?: { commitment: string; serverTs?: string };
+  frankingKey?: string;
+  frankVerified?: boolean;
   // System messages only
   content?: string;
   attachments: ChatAttachment[];
@@ -57,13 +94,35 @@ export interface Message {
 
 // ── Conversation ──────────────────────────────────────────────────────────────
 
+type UserRef = string | { _id: string; name?: string; avatarUrl?: string; email?: string; phone?: string };
+
+export interface ProjectInfo {
+  status: "active" | "on_hold" | "completed";
+  customers: UserRef[];
+  leadDesigner: UserRef;
+  backupDesigner?: UserRef | null;
+  manager?: UserRef | null;
+  createdBy: string;
+  createdAt: string;
+  stage?: "consultation" | "site_measurement" | "design" | "quotation" | "production" | "installation" | "handover";
+  stageHistory?: { stage: string; at: string; note?: string }[];
+  expectedHandover?: string | null;
+}
+
 export interface Conversation {
   _id: string;
   type: ConversationType;
   name?: string;
   avatarUrl?: string;
   members: ConversationMember[];
-  groupKeys?: Record<string, string>; // userId → base64(encryptedGroupKey)
+  groupKeys?: Record<string, string>; // legacy (version 0): userId → wrapped key
+  groupKeyring?: GroupKeyVersion[];
+  /** Set for Bonito project chats (managed from Admin → Projects) */
+  project?: ProjectInfo;
+  /** Project chats: set while an abuse alert is open (drives the warning popup) */
+  moderation?: { openIncident?: string | null; warningAt?: string | null };
+  /** The current key must be replaced by a staff member of the group */
+  rekeyRequested?: boolean;
   createdBy: string;
   lastMessage?: Message;
   lastActivityAt: string;
@@ -102,7 +161,7 @@ export interface PresencePayload {
 export interface MemberAddedPayload {
   conversationId: string;
   user: User;
-  encryptedGroupKey: string | null;
+  groupKeyring?: GroupKeyVersion[];
 }
 
 export interface MemberRemovedPayload {
@@ -112,7 +171,8 @@ export interface MemberRemovedPayload {
 
 export interface RekeyPayload {
   conversationId: string;
-  groupKeys: Record<string, string>;
+  groupKeyring: GroupKeyVersion[];
+  groupKeys?: Record<string, string>;
 }
 
 // ── API request bodies ────────────────────────────────────────────────────────
@@ -126,7 +186,7 @@ export interface CreateGroupBody {
   type: "group";
   name: string;
   memberIds: string[];
-  encryptedGroupKeys: Record<string, string>;
+  encryptedGroupKeys: Record<string, WrappedKeyInput>;
 }
 
 export interface SendMessageBody {
@@ -135,6 +195,9 @@ export interface SendMessageBody {
   type?: "text" | "image" | "file";
   attachments?: ChatAttachment[];
   replyTo?: string;
+  keyRef?: KeyRef;
+  franking?: { commitment: string };
+  moderation?: { flagged: true; severity: "mild" | "abusive" | "threat"; hitCount: number };
 }
 
 export interface PublicKeyInfo {
@@ -142,5 +205,6 @@ export interface PublicKeyInfo {
   name: string;
   publicKey: string;
   keyVersion: number;
+  currentKeyVersion?: number;
   keyUpdatedAt: string;
 }

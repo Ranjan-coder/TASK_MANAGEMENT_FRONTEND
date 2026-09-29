@@ -1,12 +1,20 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api/client";
 import { useNotificationStore } from "@/store/notificationStore";
 import { getSocket } from "@/lib/socket";
 import { ApiResponse, Notification } from "@/types";
 import { toast } from "sonner";
+import { useAuthStore } from "@/store/authStore";
+import { notificationTarget, URGENT_TYPES } from "@/lib/notifications";
+
+const toasted = new Set<string>();
 
 export function useNotifications() {
+  const router = useRouter();
+  const routerRef = useRef(router);
+  routerRef.current = router;
   const { notifications, unreadCount, setNotifications, addNotification, markAsRead, markAllAsRead } =
     useNotificationStore();
 
@@ -26,9 +34,17 @@ export function useNotifications() {
     if (!socket) return;
 
     const handleNewNotification = (notification: Notification) => {
+      // Several components use this hook; toast each notification once
+      if (toasted.has(notification._id)) return;
+      toasted.add(notification._id);
       addNotification(notification);
-      toast.info(notification.title, {
-        description: notification.message
+      if (notification.type === "sla_reminder") return; // shown as a popup instead
+      const target = notificationTarget(notification, useAuthStore.getState().user?.role);
+      const urgent = URGENT_TYPES.has(notification.type);
+      (urgent ? toast.warning : toast.info)(notification.title, {
+        description: notification.message,
+        duration: urgent ? 12_000 : undefined,
+        action: target ? { label: "Open", onClick: () => routerRef.current.push(target) } : undefined
       });
     };
 

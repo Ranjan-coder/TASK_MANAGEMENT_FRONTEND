@@ -1,4 +1,7 @@
-export type Role = "superadmin" | "admin" | "user";
+export type Role = "superadmin" | "admin" | "marketing" | "user" | "customer";
+
+// Roles that use the staff app (everything except customers)
+export const STAFF_ROLES: Role[] = ["superadmin", "admin", "marketing", "user"];
 export type TaskStatus = "todo" | "in_progress" | "in_review" | "completed" | "blocked" | "cancelled";
 export type TaskPriority = "low" | "medium" | "high" | "critical";
 
@@ -12,6 +15,12 @@ export interface User {
   designation?: string;
   status: "active" | "inactive" | "suspended";
   isTwoFactorEnabled: boolean;
+  mustChangePassword?: boolean;
+  phone?: string;
+  phoneVerified?: boolean;
+  consent?: { termsAcceptedAt: string | null; privacyVersion: string | null };
+  availability?: { status: "available" | "on_leave"; until: string | null };
+  notificationPrefs?: { whatsapp: boolean; sms: boolean };
   lastLogin?: string;
   createdAt: string;
   // E2E chat fields
@@ -80,6 +89,7 @@ export interface Notification {
   title: string;
   message: string;
   relatedTask?: Task;
+  relatedConversation?: string | null;
   isRead: boolean;
   createdAt: string;
 }

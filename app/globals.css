@@ -79,3 +79,11 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover,
 input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   opacity: 1;
 }
+
+/* Printing a receipt: only the receipt, no app chrome */
+@media print {
+  body * { visibility: hidden; }
+  [aria-label="Payment receipt"], [aria-label="Payment receipt"] * { visibility: visible; }
+  [aria-label="Payment receipt"] { position: absolute; inset: 0 auto auto 0; width: 100%; }
+  body { background: #fff !important; }
+}

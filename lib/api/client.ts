@@ -26,10 +26,26 @@ apiClient.interceptors.response.use(
         await axios.post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true });
         return apiClient(originalRequest);
       } catch (refreshError) {
+        // Signed out from another device (Settings → Devices): remove this
+        // browser's copy of the chat keys too.
+        if ((refreshError as any)?.response?.data?.errors?.[0]?.code === "DEVICE_SIGNED_OUT") {
+          const { forgetDeviceKeys } = await import("@/lib/auth/credentials");
+          await forgetDeviceKeys().catch(() => {});
+        }
         if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
           window.location.href = "/login";
         }
         return Promise.reject(refreshError);
+      }
+    }
+
+    // Server-side gates from accessPolicy.js
+    if (error.response?.status === 403 && typeof window !== "undefined") {
+      const code = error.response?.data?.errors?.[0]?.code;
+      if (code === "PASSWORD_CHANGE_REQUIRED" || code === "TWO_FACTOR_REQUIRED") {
+        if (!window.location.pathname.startsWith("/settings")) {
+          window.location.href = "/settings?section=security";
+        }
       }
     }
 

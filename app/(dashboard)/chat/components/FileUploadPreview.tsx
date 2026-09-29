@@ -1,13 +1,17 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { encryptFile, encryptMessage, bufToB64 } from "@/lib/crypto/e2e";
+import { toast } from "sonner";
+import { encryptFile } from "@/lib/crypto/e2e";
+import type { SendKey } from "@/lib/crypto/conversationKeys";
+import apiClient from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import { FileText, Image as ImageIcon, X, Upload, Lock } from "lucide-react";
 
 interface FileUploadPreviewProps {
   conversationId: string;
-  sessionKey: CryptoKey | null;
+  /** Current key for new messages (null while this user has no key yet). */
+  sendKey: SendKey | null;
   onUploaded: () => void;
   onCancel: () => void;
 }
@@ -18,7 +22,7 @@ interface PendingFile {
   fileType: "image" | "pdf" | "doc" | "docx" | "xls" | "xlsx" | "other";
 }
 
-export function FileUploadPreview({ conversationId, sessionKey, onUploaded, onCancel }: FileUploadPreviewProps) {
+export function FileUploadPreview({ conversationId, sendKey, onUploaded, onCancel }: FileUploadPreviewProps) {
   const [pending, setPending] = useState<PendingFile | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -37,7 +41,7 @@ export function FileUploadPreview({ conversationId, sessionKey, onUploaded, onCa
   };
 
   const handleUpload = async () => {
-    if (!pending || !sessionKey) return;
+    if (!pending || !sendKey) return;
     setUploading(true);
     setProgress(0);
 
@@ -47,7 +51,7 @@ export function FileUploadPreview({ conversationId, sessionKey, onUploaded, onCa
       setProgress(20);
 
       // 2. Encrypt file bytes client-side
-      const { encryptedBuffer, iv: fileIv } = await encryptFile(buffer, sessionKey);
+      const { encryptedBuffer, iv: fileIv } = await encryptFile(buffer, sendKey.key);
       setProgress(50);
 
       // 3. Generate a per-file AES key (we use the session key directly; fileIv provides uniqueness)
@@ -64,18 +68,14 @@ export function FileUploadPreview({ conversationId, sessionKey, onUploaded, onCa
       formData.append("fileType", pending.fileType);
       formData.append("encryptedFileKey", encryptedFileKey);
       formData.append("fileIv", fileIv);
+      formData.append("keyRef", JSON.stringify(sendKey.keyRef));
 
       setProgress(70);
 
       // 5. Upload to backend
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
-      const resp = await fetch(`${API}/chat/conversations/${conversationId}/attachments`, {
-        method: "POST",
-        credentials: "include",
-        body: formData
+      await apiClient.post(`/chat/conversations/${conversationId}/attachments`, formData, {
+        headers: { "Content-Type": "multipart/form-data" }
       });
-
-      if (!resp.ok) throw new Error("Upload failed");
       setProgress(100);
 
       if (pending.previewUrl) URL.revokeObjectURL(pending.previewUrl);
@@ -83,6 +83,7 @@ export function FileUploadPreview({ conversationId, sessionKey, onUploaded, onCa
       onUploaded();
     } catch (err) {
       console.error("Upload error:", err);
+      toast.error("Couldn't upload the file. Please try again.");
     } finally {
       setUploading(false);
       setProgress(0);
@@ -108,7 +109,7 @@ export function FileUploadPreview({ conversationId, sessionKey, onUploaded, onCa
           />
           <button
             onClick={() => inputRef.current?.click()}
-            disabled={!sessionKey}
+            disabled={!sendKey}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-violet-500/40 text-xs transition disabled:opacity-50"
           >
             <Upload className="h-3.5 w-3.5" />

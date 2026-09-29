@@ -19,6 +19,7 @@ interface ChatState {
   // ── Conversation actions ──────────────────────────────────────────────────
   setConversations: (convs: Conversation[]) => void;
   upsertConversation: (conv: Conversation) => void;
+  removeConversation: (convId: string) => void;
   setActiveConversation: (id: string | null) => void;
   markConversationRead: (convId: string) => void;
 
@@ -76,6 +77,17 @@ export const useChatStore = create<ChatState>((set) => ({
       );
       const totalUnread = next.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
       return { conversations: next, totalUnread };
+    }),
+
+  removeConversation: (convId) =>
+    set((state) => {
+      const messages = { ...state.messages };
+      delete messages[convId];
+      return {
+        conversations: state.conversations.filter((c) => c._id !== convId),
+        messages,
+        activeConversationId: state.activeConversationId === convId ? null : state.activeConversationId
+      };
     }),
 
   setActiveConversation: (id) => set({ activeConversationId: id }),

@@ -8,18 +8,25 @@ import { Conversation } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNowStrict } from "date-fns";
 import { Search, Plus, Users, MessageSquare, MessageSquarePlus, Lock, Key, ShieldCheck } from "lucide-react";
+import { RecoveryBanner } from "./RecoveryKey";
 import { GroupCreateModal } from "./GroupCreateModal";
 import { DirectMessageModal } from "./DirectMessageModal";
 
 interface ChatSidebarProps {
   className?: string;
+  /** This browser has no copy of the chat keys yet */
   needsKeySetup?: boolean;
+  /** Opens the password prompt that unlocks the keys */
   onOpenKeySetup?: () => void;
+  /** Opens the encryption info / fingerprint dialog */
+  onOpenKeySettings?: () => void;
 }
 
-export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup }: ChatSidebarProps) {
+export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup, onOpenKeySettings }: ChatSidebarProps) {
   const router = useRouter();
   const { user } = useAuthStore();
+  // Customers chat only in project groups that Bonito creates for them
+  const canStartChats = user?.role !== "customer";
   const { conversations, activeConversationId, setActiveConversation, onlineUsers, totalUnread } =
     useChatStore();
   const [search, setSearch] = useState("");
@@ -58,12 +65,14 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup }: ChatSi
             </div>
             <div className="flex items-center gap-1.5">
               <button
-                onClick={onOpenKeySetup}
-                title="Manage Encryption Keys"
+                onClick={onOpenKeySettings}
+                title="Encryption settings"
                 className="h-7 w-7 rounded-lg bg-slate-800 hover:bg-violet-600/20 border border-slate-700 hover:border-violet-500/40 flex items-center justify-center transition text-slate-400 hover:text-violet-400"
               >
                 <Key className="h-3.5 w-3.5" />
               </button>
+              {canStartChats && (
+              <>
               <button
                 onClick={() => setShowDMModal(true)}
                 title="New direct message"
@@ -78,6 +87,8 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup }: ChatSi
               >
                 <Users className="h-3.5 w-3.5" />
               </button>
+              </>
+              )}
             </div>
           </div>
 
@@ -99,18 +110,20 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup }: ChatSi
             <div className="flex items-center gap-2 min-w-0">
               <Lock className="h-4 w-4 text-amber-400 shrink-0" />
               <div className="min-w-0">
-                <p className="text-xs font-semibold text-amber-300 truncate">Keys required</p>
-                <p className="text-[10px] text-amber-400/80 truncate">Set up E2E keys to chat</p>
+                <p className="text-xs font-semibold text-amber-300 truncate">Chats locked</p>
+                <p className="text-[10px] text-amber-400/80 truncate">Enter your password to read messages</p>
               </div>
             </div>
             <button
               onClick={onOpenKeySetup}
               className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold transition shrink-0"
             >
-              Setup
+              Unlock
             </button>
           </div>
         )}
+
+        {!needsKeySetup && <RecoveryBanner onOpenSettings={() => onOpenKeySettings?.()} />}
 
         {/* E2E status & Key Settings bar */}
         <div className="px-4 py-2 border-b border-slate-800/40 flex items-center justify-between">
@@ -119,11 +132,11 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup }: ChatSi
             <span className="text-[10px] text-emerald-400 font-medium">End-to-end encrypted</span>
           </div>
           <button
-            onClick={onOpenKeySetup}
+            onClick={onOpenKeySettings}
             className="flex items-center gap-1 text-[10px] text-violet-400 hover:text-violet-300 font-medium transition group"
           >
             <Key className="h-2.5 w-2.5 group-hover:scale-110 transition-transform" />
-            <span>Key Settings</span>
+            <span>Encryption</span>
           </button>
         </div>
 
@@ -134,7 +147,7 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup }: ChatSi
               <p className="text-slate-500 text-xs">
                 {search ? "No conversations found" : "No conversations yet"}
               </p>
-              {!search && (
+              {!search && canStartChats && (
                 <button
                   onClick={() => setShowDMModal(true)}
                   className="px-3 py-1.5 rounded-xl bg-violet-600/15 hover:bg-violet-600/25 border border-violet-500/30 text-violet-300 hover:text-violet-200 text-xs font-medium transition inline-flex items-center gap-1.5"

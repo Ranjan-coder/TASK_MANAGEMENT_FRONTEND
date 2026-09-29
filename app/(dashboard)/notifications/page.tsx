@@ -4,20 +4,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { notificationsApi } from "../../../lib/api/notifications.api";
 import { useNotificationStore } from "../../../store/notificationStore";
 import type { Notification } from "../../../types";
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/authStore";
+import { notificationTarget, NOTIFICATION_ICONS } from "@/lib/notifications";
 
-const TYPE_ICONS: Record<string, string> = {
-  task_assigned: "📋",
-  task_updated: "✏️",
-  task_status_changed: "🔄",
-  comment_added: "💬",
-  mentioned: "@",
-  due_date_reminder: "⏰",
-  task_completed: "✅",
-  account_created: "👤"
-};
 
 export default function NotificationsPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const role = useAuthStore((s) => s.user?.role);
   const decrementUnread = useNotificationStore((s) => s.decrementUnread);
   const resetUnread = useNotificationStore((s) => s.resetUnread);
 
@@ -97,10 +92,23 @@ export default function NotificationsPage() {
               }`}
             >
               <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center text-xl flex-shrink-0">
-                {TYPE_ICONS[n.type] ?? "🔔"}
+                {NOTIFICATION_ICONS[n.type] ?? "🔔"}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-slate-200 text-sm font-medium">{n.title}</p>
+                {notificationTarget(n, role) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!n.isRead) markReadMutation.mutate(n._id);
+                      router.push(notificationTarget(n, role)!);
+                    }}
+                    className="text-left text-slate-200 text-sm font-medium hover:text-white hover:underline"
+                  >
+                    {n.title}
+                  </button>
+                ) : (
+                  <p className="text-slate-200 text-sm font-medium">{n.title}</p>
+                )}
                 <p className="text-slate-400 text-xs mt-0.5 line-clamp-2">{n.message}</p>
                 <p className="text-slate-600 text-xs mt-1">
                   {new Date(n.createdAt).toLocaleDateString()} · {new Date(n.createdAt).toLocaleTimeString()}

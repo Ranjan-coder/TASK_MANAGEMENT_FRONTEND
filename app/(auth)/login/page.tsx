@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -12,10 +12,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { apiClient } from "@/lib/api/client";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
+import { homeRouteFor } from "@/lib/utils";
 import { ApiResponse, User } from "@/types";
+import { PhoneVerification } from "@/components/auth/PhoneVerification";
+import { prepareLogin, finishSignIn } from "@/lib/auth/credentials";
+import { isValidIndianMobile, type PhoneVerificationStep, type VerifiedSession } from "@/lib/api/customerAuth.api";
 
 const loginSchema = z.object({
-  email: z.string().email("Invalid email address"),
+  identifier: z
+    .string()
+    .trim()
+    .min(1, "Enter your email or mobile number")
+    .refine((v) => (v.includes("@") ? z.string().email().safeParse(v).success : isValidIndianMobile(v)), {
+      message: "Enter a valid email or 10-digit mobile number"
+    }),
   password: z.string().min(1, "Password is required")
 });
 
@@ -28,6 +38,31 @@ export default function LoginPage() {
   const [requires2FA, setRequires2FA] = useState(false);
   const [tempToken, setTempToken] = useState("");
   const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [phoneStep, setPhoneStep] = useState<PhoneVerificationStep | null>(null);
+  // Derived from the password at submit; opens the chat key bundle once signed in
+  const wrapKeyRef = useRef<CryptoKey | null>(null);
+  const [trustDevice, setTrustDevice] = useState(true);
+
+  /** Signed in: store the user, unlock chat keys on this device, go home. */
+  const completeSignIn = async (signedIn: User, message: string) => {
+    setUser(signedIn);
+    if (wrapKeyRef.current) await finishSignIn(signedIn._id, wrapKeyRef.current);
+    wrapKeyRef.current = null;
+    toast.success(message);
+    router.push(homeRouteFor(signedIn));
+  };
+
+  const handlePhoneVerified = (session: VerifiedSession) => {
+    setPhoneStep(null);
+    if (session.requires2FA) {
+      setRequires2FA(true);
+      setTempToken(session.tempToken || "");
+      return;
+    }
+    if (session.user) {
+      completeSignIn(session.user, "Mobile number verified. Welcome!");
+    }
+  };
 
   const {
     register,
@@ -40,19 +75,21 @@ export default function LoginPage() {
   const onLoginSubmit = async (data: LoginFormData) => {
     setIsLoading(true);
     try {
-      const res = await apiClient.post<ApiResponse<{ requires2FA?: boolean; tempToken?: string; user?: User }>>(
-        "/auth/login",
-        data
-      );
+      // The password never leaves the browser: derive the login key from it
+      const { body, wrapKey } = await prepareLogin(data.identifier.trim(), data.password, trustDevice);
+      wrapKeyRef.current = wrapKey;
+      const res = await apiClient.post<
+        ApiResponse<{ requires2FA?: boolean; tempToken?: string; user?: User } & Partial<PhoneVerificationStep>>
+      >("/auth/login", body);
 
-      if (res.data.data.requires2FA) {
+      if (res.data.data.requiresPhoneVerification) {
+        setPhoneStep(res.data.data as PhoneVerificationStep);
+      } else if (res.data.data.requires2FA) {
         setRequires2FA(true);
         setTempToken(res.data.data.tempToken || "");
         toast.info("Two-Factor Authentication Required");
       } else if (res.data.data.user) {
-        setUser(res.data.data.user);
-        toast.success("Welcome back!");
-        router.push("/dashboard");
+        await completeSignIn(res.data.data.user, "Welcome back!");
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Invalid credentials");
@@ -74,9 +111,7 @@ export default function LoginPage() {
         tempToken,
         code: twoFactorCode
       });
-      setUser(res.data.data.user);
-      toast.success("2FA Verified Successfully");
-      router.push("/dashboard");
+      await completeSignIn(res.data.data.user, "2FA Verified Successfully");
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Invalid 2FA code");
     } finally {
@@ -91,28 +126,34 @@ export default function LoginPage() {
           <div className="mx-auto h-10 w-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-xl mb-2">
             T
           </div>
-          <CardTitle className="text-xl">Sign in to TaskManager</CardTitle>
+          <CardTitle className="text-xl">Sign in to Bonito</CardTitle>
           <CardDescription>
-            {!requires2FA
-              ? "Enter your organizational credentials to continue"
-              : "Enter the 6-digit code from your authenticator app"}
+            {phoneStep
+              ? "Verify your mobile number to continue"
+              : !requires2FA
+                ? "Use your email or mobile number to continue"
+                : "Enter the 6-digit code from your authenticator app"}
           </CardDescription>
         </CardHeader>
 
         <CardContent>
-          {!requires2FA ? (
+          {phoneStep ? (
+            <PhoneVerification step={phoneStep} onVerified={handlePhoneVerified} onCancel={() => setPhoneStep(null)} />
+          ) : !requires2FA ? (
             <form onSubmit={handleSubmit(onLoginSubmit)} className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Work Email
+                  Email or mobile number
                 </label>
                 <Input
-                  type="email"
-                  placeholder="name@company.com"
-                  {...register("email")}
+                  id="login-identifier"
+                  type="text"
+                  autoComplete="username"
+                  placeholder="you@example.com or 98765 43210"
+                  {...register("identifier")}
                   disabled={isLoading}
                 />
-                {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+                {errors.identifier && <p className="text-xs text-red-500">{errors.identifier.message}</p>}
               </div>
 
               <div className="space-y-1">
@@ -120,7 +161,9 @@ export default function LoginPage() {
                   Password
                 </label>
                 <Input
+                  id="login-password"
                   type="password"
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   {...register("password")}
                   disabled={isLoading}
@@ -137,6 +180,21 @@ export default function LoginPage() {
                   </Link>
                 </div>
               </div>
+
+              <label htmlFor="login-trust" className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                <input
+                  id="login-trust"
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-blue-600"
+                  checked={trustDevice}
+                  onChange={(e) => setTrustDevice(e.target.checked)}
+                  disabled={isLoading}
+                />
+                <span>
+                  Keep me signed in on this device
+                  <span className="block text-[11px] text-slate-500">Untick on shared or office computers.</span>
+                </span>
+              </label>
 
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? "Signing in..." : "Sign In"}
@@ -177,7 +235,7 @@ export default function LoginPage() {
                 className="w-full text-xs"
                 onClick={() => setRequires2FA(false)}
               >
-                Back to email login
+                Back to sign in
               </Button>
             </form>
           )}

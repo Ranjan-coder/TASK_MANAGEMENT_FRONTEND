@@ -12,19 +12,7 @@ import {
   fetchConversations,
   fetchPublicKey
 } from "@/lib/api/chat.api";
-import {
-  deriveSessionKey,
-  wrapGroupKey,
-  unwrapGroupKey,
-  generateGroupKey
-} from "@/lib/crypto/e2e";
-import {
-  loadPrivateKey,
-  ensureUserKeys,
-  getCachedSessionKey,
-  groupCacheKey,
-  setCachedSessionKey
-} from "@/lib/crypto/keyStore";
+import { rotateConversationGroupKey } from "@/lib/crypto/conversationKeys";
 import {
   X,
   Users,
@@ -38,6 +26,7 @@ import {
   Check
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { StageEditor } from "./StageEditor";
 import { toast } from "sonner";
 
 interface GroupInfoPanelProps {
@@ -56,7 +45,19 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
   const [loading, setLoading] = useState<string | null>(null); // tracks which action is in progress
 
   const myMember = conversation.members.find((m) => m.user._id === user?._id);
-  const isAdmin = myMember?.role === "admin";
+  // Project chats are managed from Admin → Projects: no rename/remove/leave here
+  const project = conversation.project;
+  const isAdmin = myMember?.role === "admin" && !project;
+
+  const refId = (ref: unknown) => (typeof ref === "string" ? ref : (ref as { _id?: string } | null)?._id ?? null);
+  const projectRole = (userId: string): string | undefined => {
+    if (!project) return undefined;
+    if (refId(project.leadDesigner) === userId) return "Lead designer";
+    if (refId(project.backupDesigner) === userId) return "Backup designer";
+    if (refId(project.manager) === userId) return "Project manager";
+    if (project.customers.some((c) => refId(c) === userId)) return "Customer";
+    return "Bonito team";
+  };
 
   // ── Rename group ────────────────────────────────────────────────────────────
   const handleRename = async () => {
@@ -83,53 +84,19 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
     try {
       await removeMember(conversation._id, memberId);
 
-      // Re-key: generate new group key encrypted for remaining members
-      const myPrivKey = await loadPrivateKey(user!._id);
-      if (!myPrivKey) {
-        toast.warning("Member removed but re-keying skipped (no private key found)");
-        return;
+      // New key version for the remaining members, so the removed member
+      // can't read anything sent from now on. Older versions stay, so history
+      // remains readable. Only group admins can rotate (enforced by the server).
+      try {
+        const remaining = conversation.members
+          .filter((m) => m.user._id !== memberId)
+          .map((m) => ({ _id: m.user._id, publicKey: m.user.publicKey, keyVersion: m.user.keyVersion }));
+        await rotateConversationGroupKey(conversation, user!._id, remaining);
+        toast.success("Member removed. New messages use a new key they can't read.");
+      } catch (err) {
+        console.warn("Group key rotation failed:", err);
+        toast.warning("Member removed, but the group key couldn't be rotated. A group admin should reopen the group.");
       }
-
-      const newGroupKey = await generateGroupKey();
-      const remainingMembers = conversation.members.filter(
-        (m) => m.user._id !== memberId && m.user._id !== user!._id
-      );
-
-      const newGroupKeys: Record<string, string> = {};
-
-      // Encrypt for self
-      const { publicKeyB64: selfPubKey } = await ensureUserKeys(user!._id);
-      const selfSession = await deriveSessionKey(myPrivKey, selfPubKey);
-      newGroupKeys[user!._id] = await wrapGroupKey(newGroupKey, selfSession);
-
-      // Encrypt for remaining members
-      for (const member of remainingMembers) {
-        try {
-          let memberKey = member.user.publicKey;
-          if (!memberKey) {
-            const keyInfo = await fetchPublicKey(member.user._id);
-            memberKey = keyInfo?.publicKey;
-          }
-          if (memberKey) {
-            const session = await deriveSessionKey(myPrivKey, memberKey);
-            newGroupKeys[member.user._id] = await wrapGroupKey(newGroupKey, session);
-          }
-        } catch {}
-      }
-
-      // Push new keys to server
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
-      await fetch(`${API}/chat/conversations/${conversation._id}/group-keys`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newGroupKeys })
-      });
-
-      // Update cached group key
-      setCachedSessionKey(groupCacheKey(conversation._id), newGroupKey);
-
-      toast.success("Member removed and keys rotated (forward secrecy applied)");
 
       // Refresh
       const convs = await fetchConversations();
@@ -211,6 +178,19 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
         )}
 
         <p className="text-xs text-slate-400">{conversation.members.length} members</p>
+        {project && (
+          <p className="text-[11px] text-center text-slate-500 px-2">
+            Project chat · {{ active: "Active", on_hold: "On hold", completed: "Completed" }[project.status]}. The team is managed by
+            Bonito — contact us to add or change people.
+          </p>
+        )}
+        {project && (
+          <StageEditor
+            conversation={conversation}
+            canEdit={Boolean(user && [project.leadDesigner, project.backupDesigner, project.manager].some((u) => refId(u) === user._id))}
+            onUpdated={(t) => onConversationUpdated?.({ ...conversation, project: { ...project, ...t } })}
+          />
+        )}
       </div>
 
       {/* Members list */}
@@ -224,6 +204,7 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
             member={member}
             isMe={member.user._id === user?._id}
             isAdmin={isAdmin}
+            roleLabel={projectRole(member.user._id)}
             loading={loading === member.user._id}
             onRemove={() => handleRemove(member.user._id)}
           />
@@ -231,6 +212,7 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
       </div>
 
       {/* Footer actions */}
+      {!project && (
       <div className="px-4 pb-5 pt-2 border-t border-slate-800 space-y-2">
         <button
           onClick={handleLeave}
@@ -245,6 +227,7 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
           Leave Group
         </button>
       </div>
+      )}
     </div>
   );
 }
@@ -253,11 +236,13 @@ interface MemberRowProps {
   member: ConversationMember;
   isMe: boolean;
   isAdmin: boolean;
+  /** Role in a project chat, e.g. "Lead designer" */
+  roleLabel?: string;
   loading: boolean;
   onRemove: () => void;
 }
 
-function MemberRow({ member, isMe, isAdmin, loading, onRemove }: MemberRowProps) {
+function MemberRow({ member, isMe, isAdmin, roleLabel, loading, onRemove }: MemberRowProps) {
   return (
     <div className="flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-slate-800/50 transition group">
       {/* Avatar */}
@@ -280,11 +265,11 @@ function MemberRow({ member, isMe, isAdmin, loading, onRemove }: MemberRowProps)
             {member.user.name}
             {isMe && <span className="text-slate-500 text-xs ml-1">(you)</span>}
           </span>
-          {member.role === "admin" && (
+          {member.role === "admin" && !roleLabel && (
             <Crown className="h-3 w-3 text-amber-400 shrink-0" />
           )}
         </div>
-        <span className="text-[10px] text-slate-500">{member.user.designation || member.role}</span>
+        <span className="text-[10px] text-slate-500">{roleLabel || member.user.designation || member.role}</span>
       </div>
 
       {/* Remove button (admin only, not self) */}

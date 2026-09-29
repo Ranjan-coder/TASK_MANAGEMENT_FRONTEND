@@ -4,12 +4,11 @@ import { useEffect, useRef, useCallback } from "react";
 import { getSocket } from "@/lib/socket";
 import { useChatStore } from "@/store/chatStore";
 import { useAuthStore } from "@/store/authStore";
-import { decryptMessage } from "@/lib/crypto/e2e";
 import {
-  getCachedSessionKey,
-  dmCacheKey,
-  groupCacheKey
-} from "@/lib/crypto/keyStore";
+  ConversationCrypto,
+  getConversationCrypto,
+  registerConversationCrypto
+} from "@/lib/crypto/conversationKeys";
 import {
   Message,
   TypingPayload,
@@ -21,14 +20,18 @@ import {
   RekeyPayload
 } from "@/types/chat";
 import { Conversation } from "@/types/chat";
+import { decryptTextWith } from "@/lib/crypto/conversationKeys";
 
 /**
  * Hook that subscribes to all chat-related socket events.
  * Must be mounted once in the chat layout — handles all inbound events.
  *
- * Decryption happens here: we look up the session key from cache,
- * decrypt the message, then attach decryptedContent before storing.
+ * Decryption happens here via the conversation's ConversationCrypto (which
+ * picks the right key version per message), then decryptedContent is attached.
  */
+
+/** Fired when a conversation's keys change so an open chat re-resolves its keys. */
+export const CHAT_KEYS_UPDATED_EVENT = "chat:keys-updated";
 export const useChat = () => {
   const socket = getSocket();
   const { user } = useAuthStore();
@@ -47,36 +50,44 @@ export const useChat = () => {
   const activeConvRef = useRef<string | null>(null);
   activeConvRef.current = activeConversationId;
 
-  // ── Decrypt a message using the cached session key ──────────────────────
-  const decryptMsg = useCallback(
-    async (
-      msg: Message,
-      convType: "dm" | "group",
-      otherUserId?: string,
-      convId?: string,
-      otherKeyVersion?: number
-    ): Promise<Message> => {
-      if (msg.type === "system" || msg.isDeleted || !msg.ciphertext || !msg.iv) return msg;
-
+  // ── Crypto for a conversation (reuses the open chat's, or builds one) ────
+  const cryptoFor = useCallback(
+    async (conv: Conversation): Promise<ConversationCrypto | null> => {
+      const existing = getConversationCrypto(conv._id);
+      if (existing) return existing;
+      if (!user) return null;
       try {
-        const cacheKey =
-          convType === "dm" && otherUserId
-            ? dmCacheKey(otherUserId, otherKeyVersion)
-            : groupCacheKey(convId || msg.conversation);
-
-        const sessionKey = getCachedSessionKey(cacheKey);
-        if (!sessionKey) {
-          // Session key not yet derived — mark as pending
-          return { ...msg, decryptedContent: "🔑 Decrypting...", decryptionFailed: false };
-        }
-
-        const plain = await decryptMessage(msg.ciphertext, msg.iv, sessionKey);
-        return { ...msg, decryptedContent: plain };
+        const c = await ConversationCrypto.create(conv, user._id);
+        registerConversationCrypto(c);
+        return c;
       } catch {
-        return { ...msg, decryptedContent: "🔒 Unable to decrypt", decryptionFailed: true };
+        return null; // keys locked on this device
       }
     },
-    []
+    [user]
+  );
+
+  const decryptMsg = useCallback(
+    async (msg: Message, conv: Conversation): Promise<Message> => {
+      if (msg.type === "system" || msg.isDeleted || !msg.ciphertext || !msg.iv) return msg;
+      const c = await cryptoFor(conv);
+      if (!c) return { ...msg, decryptedContent: "🔑 Decrypting...", decryptionFailed: false };
+      return c.decrypt(msg);
+    },
+    [cryptoFor]
+  );
+
+  /** Swap in fresh conversation data (new key versions) and tell the open chat. */
+  const refreshCrypto = useCallback(
+    async (conv: Conversation) => {
+      if (user && getConversationCrypto(conv._id)) {
+        try {
+          registerConversationCrypto(await ConversationCrypto.create(conv, user._id));
+        } catch {}
+      }
+      window.dispatchEvent(new CustomEvent(CHAT_KEYS_UPDATED_EVENT, { detail: { conversationId: conv._id } }));
+    },
+    [user]
   );
 
   useEffect(() => {
@@ -96,11 +107,7 @@ export const useChat = () => {
         } catch {}
       }
 
-      let decrypted = msg;
-      if (conv) {
-        const otherMember = conv.members.find((m) => m.user._id !== user._id);
-        decrypted = await decryptMsg(msg, conv.type, otherMember?.user._id, conv._id, otherMember?.user.keyVersion);
-      }
+      const decrypted = conv ? await decryptMsg(msg, conv) : msg;
 
       appendMessage(msg.conversation, decrypted);
 
@@ -163,19 +170,28 @@ export const useChat = () => {
     };
 
     // ── Group: member added ────────────────────────────────────────────────
-    const onMemberAdded = ({ conversationId, user: newUser }: MemberAddedPayload) => {
+    const onMemberAdded = ({ conversationId, user: newUser, groupKeyring }: MemberAddedPayload) => {
       const { conversations } = useChatStore.getState();
       const conv = conversations.find((c) => c._id === conversationId);
       if (conv && !conv.members.some((m) => m.user._id === newUser._id)) {
-        upsertConversation({
+        const updated: Conversation = {
           ...conv,
-          members: [...conv.members, { user: newUser, role: "member", joinedAt: new Date().toISOString(), lastRead: null }]
-        });
+          members: [...conv.members, { user: newUser, role: "member", joinedAt: new Date().toISOString(), lastRead: null }],
+          ...(groupKeyring ? { groupKeyring } : {})
+        };
+        upsertConversation(updated);
+        refreshCrypto(updated);
       }
     };
 
     // ── Group: member removed ──────────────────────────────────────────────
     const onMemberRemoved = ({ conversationId, userId }: MemberRemovedPayload) => {
+      // I was removed: drop the chat from this device
+      if (userId === user._id) {
+        useChatStore.getState().removeConversation(conversationId);
+        if (window.location.pathname === `/chat/${conversationId}`) window.location.href = "/chat";
+        return;
+      }
       const { conversations } = useChatStore.getState();
       const conv = conversations.find((c) => c._id === conversationId);
       if (conv) {
@@ -187,12 +203,20 @@ export const useChat = () => {
     };
 
     // ── Group: re-key ──────────────────────────────────────────────────────────
-    const onRekey = ({ conversationId, groupKeys }: RekeyPayload) => {
+    const onRekey = ({ conversationId, groupKeyring, groupKeys }: RekeyPayload) => {
       const { conversations } = useChatStore.getState();
       const conv = conversations.find((c) => c._id === conversationId);
       if (conv) {
-        upsertConversation({ ...conv, groupKeys });
+        const updated: Conversation = { ...conv, groupKeyring, ...(groupKeys ? { groupKeys } : {}) };
+        upsertConversation(updated);
+        refreshCrypto(updated);
       }
+    };
+
+    // ── Project team / status changed (Admin → Projects) ───────────────────────
+    const onProjectUpdated = (conv: Conversation) => {
+      upsertConversation(conv);
+      refreshCrypto(conv);
     };
 
     // ── Message edited ─────────────────────────────────────────────────────────
@@ -201,32 +225,40 @@ export const useChat = () => {
       conversationId,
       ciphertext,
       iv,
+      keyRef,
+      franking,
       editedAt
-    }: { messageId: string; conversationId: string; ciphertext: string; iv: string; editedAt: string }) => {
+    }: {
+      messageId: string;
+      conversationId: string;
+      ciphertext: string;
+      iv: string;
+      keyRef?: Message["keyRef"];
+      franking?: Message["franking"];
+      editedAt: string;
+    }) => {
       const { messages, conversations } = useChatStore.getState();
       const msgs = messages[conversationId] || [];
       const msg = msgs.find((m) => m._id === messageId);
       if (!msg) return;
 
       const conv = conversations.find((c) => c._id === conversationId);
-      let decryptedContent: string | undefined;
+      let opened: { text: string; frankingKey?: string; verified: boolean } | undefined;
       try {
-        const otherMember = conv?.members.find((m) => m.user._id !== user._id);
-        const cacheKey =
-          conv?.type === "dm" && user
-            ? dmCacheKey(otherMember?.user._id || "", otherMember?.user.keyVersion)
-            : groupCacheKey(conversationId);
-        const sessionKey = getCachedSessionKey(cacheKey);
-        if (sessionKey) {
-          decryptedContent = await decryptMessage(ciphertext, iv, sessionKey);
-        }
+        const c = conv ? await cryptoFor(conv) : null;
+        const key = c ? await c.keyForMessage({ keyRef, sender: msg.sender, ciphertext, iv }) : null;
+        if (key) opened = await decryptTextWith(key, ciphertext, iv, franking?.commitment);
       } catch {}
 
       updateMessage(conversationId, {
         ...msg,
         ciphertext,
         iv,
-        decryptedContent,
+        keyRef,
+        franking,
+        decryptedContent: opened?.text,
+        frankingKey: opened?.frankingKey,
+        frankVerified: opened?.verified ?? false,
         isEdited: true,
         editedAt
       });
@@ -235,6 +267,7 @@ export const useChat = () => {
     // Register all listeners
     socket.on("chat:message", onMessage);
     socket.on("conversation:created", onConversationCreated);
+    socket.on("chat:project:updated", onProjectUpdated);
     socket.on("chat:typing", onTyping);
     socket.on("chat:read", onRead);
     socket.on("chat:reaction", onReaction);
@@ -254,6 +287,7 @@ export const useChat = () => {
     return () => {
       socket.off("chat:message", onMessage);
       socket.off("conversation:created", onConversationCreated);
+      socket.off("chat:project:updated", onProjectUpdated);
       socket.off("chat:typing", onTyping);
       socket.off("chat:read", onRead);
       socket.off("chat:reaction", onReaction);

@@ -9,11 +9,12 @@ export interface UserFilters {
   search?: string;
 }
 
+/** What the admin fills in; the password is converted before sending (see createUser). */
 export interface CreateUserPayload {
   name: string;
   email: string;
   password: string;
-  role?: "superadmin" | "admin" | "user";
+  role?: "superadmin" | "admin" | "marketing" | "user" | "customer";
   department?: string;
   designation?: string;
 }
@@ -23,6 +24,8 @@ export interface UpdateUserPayload {
   department?: string;
   designation?: string;
   avatarUrl?: string;
+  availability?: { status: "available" | "on_leave"; until?: string | null };
+  notificationPrefs?: { whatsapp: boolean; sms: boolean };
 }
 
 export const usersApi = {
@@ -31,7 +34,15 @@ export const usersApi = {
 
   getUser: (id: string) => apiClient.get(`/users/${id}`),
 
-  createUser: (data: CreateUserPayload) => apiClient.post("/users", data),
+  /**
+   * The initial password never reaches the server: it's converted to an authKey
+   * in the admin's browser. The new user must change it at first sign-in.
+   */
+  createUser: async ({ password, ...rest }: CreateUserPayload) => {
+    const { prepareNewPassword } = await import("@/lib/auth/credentials");
+    const { authKey, kdfSalt } = await prepareNewPassword(password);
+    return apiClient.post("/users", { ...rest, authKey, kdfSalt });
+  },
 
   updateUser: (id: string, data: UpdateUserPayload) =>
     apiClient.patch(`/users/${id}`, data),

@@ -5,9 +5,12 @@ import { formatDateTime } from "@/lib/utils";
 import { CheckCheck, BellOff, ArrowRight, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/authStore";
+import { notificationTarget } from "@/lib/notifications";
 
 export function NotificationDropdown({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const role = useAuthStore((s) => s.user?.role);
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
 
   const handleNotificationClick = (n: any) => {
@@ -15,12 +18,8 @@ export function NotificationDropdown({ onClose }: { onClose: () => void }) {
       markAsRead(n._id);
     }
     onClose();
-    if (n.relatedTask?._id || n.relatedTask) {
-      const taskId = typeof n.relatedTask === "object" ? n.relatedTask._id : n.relatedTask;
-      router.push(`/tasks/${taskId}`);
-    } else if (n.actionUrl) {
-      router.push(n.actionUrl);
-    }
+    const target = notificationTarget(n, role);
+    if (target) router.push(target);
   };
 
   return (

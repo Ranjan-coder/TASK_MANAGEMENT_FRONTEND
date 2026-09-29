@@ -1,10 +1,9 @@
 import apiClient from "./client";
 
 export const authApi = {
-  register: (data: { name: string; email: string; password: string; role: string; department?: string; designation?: string }) =>
-    apiClient.post("/auth/register", data),
+  prelogin: (data: { identifier: string }) => apiClient.post("/auth/prelogin", data),
 
-  login: (data: { email: string; password: string }) =>
+  login: (data: { identifier: string; authKey: string; password?: string }) =>
     apiClient.post("/auth/login", data),
 
   verify2FA: (data: { tempToken: string; code: string }) =>
@@ -14,7 +13,16 @@ export const authApi = {
 
   enable2FA: (data: { code: string }) => apiClient.post("/auth/2fa/enable", data),
 
-  disable2FA: (data: { password: string }) => apiClient.post("/auth/2fa/disable", data),
+  disable2FA: (data: { authKey?: string; password?: string; code: string }) => apiClient.post("/auth/2fa/disable", data),
+
+  changePassword: (data: {
+    currentAuthKey?: string;
+    currentPassword?: string;
+    newAuthKey: string;
+    newKdfSalt: string;
+    keyBundle?: { ciphertext: string; iv: string };
+  }) =>
+    apiClient.post("/auth/change-password", data),
 
   logout: () => apiClient.post("/auth/logout"),
 
@@ -25,7 +33,7 @@ export const authApi = {
   forgotPassword: (data: { email: string }) =>
     apiClient.post("/auth/forgot-password", data),
 
-  resetPassword: (token: string, data: { password: string }) =>
+  resetPassword: (token: string, data: { authKey: string; kdfSalt: string }) =>
     apiClient.post(`/auth/reset-password/${token}`, data),
 
   getSessions: () => apiClient.get("/auth/sessions"),
@@ -33,5 +41,7 @@ export const authApi = {
   revokeSession: (sessionId: string) =>
     apiClient.delete(`/auth/sessions/${sessionId}`),
 
-  revokeAllSessions: () => apiClient.post("/auth/sessions/revoke-all")
+  revokeAllSessions: () => apiClient.post("/auth/sessions/revoke-all"),
+
+  revokeOtherSessions: () => apiClient.post("/auth/sessions/revoke-others")
 };

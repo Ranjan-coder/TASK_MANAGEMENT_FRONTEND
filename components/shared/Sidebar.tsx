@@ -13,6 +13,20 @@ import {
   Settings,
   ShieldAlert,
   MessageSquare,
+  Megaphone,
+  Package,
+  FolderKanban,
+  Timer,
+  Flag,
+  ShieldHalf,
+  Gauge,
+  TrendingUp,
+  Contact,
+  PhoneCall,
+  Quote,
+  Lock,
+  IndianRupee,
+  Gift,
   X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,9 +38,24 @@ export function Sidebar() {
   const { isMobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
 
   const navItems = [
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Tasks", href: "/tasks", icon: CheckSquare },
+    // Customers and marketing have no access to tasks/dashboard (enforced by the API too)
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["superadmin", "admin", "user"] },
+    { label: "Tasks", href: "/tasks", icon: CheckSquare, roles: ["superadmin", "admin", "user"] },
     { label: "Chat", href: "/chat", icon: MessageSquare, badge: totalUnread },
+    { label: "Overview", href: "/admin/overview", icon: Gauge, roles: ["superadmin", "admin"] },
+    { label: "Customers", href: "/admin/customers", icon: Contact, roles: ["superadmin", "admin"] },
+    { label: "Projects", href: "/admin/projects", icon: FolderKanban, roles: ["superadmin", "admin"] },
+    { label: "Reports", href: "/admin/reports", icon: Flag, roles: ["superadmin", "admin"] },
+    { label: "Moderation", href: "/admin/moderation", icon: ShieldHalf, roles: ["superadmin", "admin"] },
+    { label: "Payments", href: "/admin/payments", icon: IndianRupee, roles: ["superadmin", "admin"] },
+    { label: "Referrals", href: "/admin/referrals", icon: Gift, roles: ["superadmin", "admin"] },
+    { label: "Performance", href: "/admin/performance", icon: TrendingUp, roles: ["superadmin", "admin"] },
+    { label: "Privacy", href: "/admin/privacy", icon: Lock, roles: ["superadmin", "admin"] },
+    { label: "Reply times", href: "/admin/reply-times", icon: Timer, roles: ["superadmin", "admin"] },
+    { label: "Campaigns", href: "/admin/campaigns", icon: Megaphone, roles: ["superadmin", "admin", "marketing"] },
+    { label: "Catalog", href: "/admin/catalog", icon: Package, roles: ["superadmin", "admin", "marketing"] },
+    { label: "Leads", href: "/admin/leads", icon: PhoneCall, roles: ["superadmin", "admin", "marketing"] },
+    { label: "Testimonials", href: "/admin/testimonials", icon: Quote, roles: ["superadmin", "admin", "marketing"] },
     {
       label: "Users",
       href: "/users",

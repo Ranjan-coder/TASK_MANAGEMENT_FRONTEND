@@ -1,9 +1,10 @@
 "use client";
 
-import { Message, ChatAttachment } from "@/types/chat";
+import { Message, ChatAttachment, KeyRef } from "@/types/chat";
+import { EditCancelledError, type EncryptedText } from "@/lib/crypto/conversationKeys";
 import { cn } from "@/lib/utils";
 import { format, isToday, isYesterday } from "date-fns";
-import { Trash2, Lock, AlertCircle, Reply, Edit2, Check, X, SmilePlus } from "lucide-react";
+import { Trash2, Lock, AlertCircle, Reply, Edit2, Check, X, SmilePlus, FileCheck2 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { FilePreview } from "./FilePreview";
 import { DeleteMessageDialog } from "./DeleteMessageDialog";
@@ -18,8 +19,12 @@ interface MessageBubbleProps {
   /** Called with "everyone" (sender only) or "me" once the user confirms in the delete dialog. */
   onDelete?: (scope: "me" | "everyone") => void;
   onReply?: () => void;
-  onEdit?: (newCiphertext: string, newIv: string) => Promise<void>;
-  encryptFn?: (text: string) => Promise<{ ciphertext: string; iv: string }>;
+  onEdit?: (encrypted: EncryptedText) => Promise<void>;
+  encryptFn?: (text: string) => Promise<EncryptedText>;
+  /** Project chats: ask the customer to approve this design (staff, image/file messages) */
+  onRequestApproval?: () => void;
+  /** Rendered under the attachment, e.g. the design approval card */
+  footer?: React.ReactNode;
 }
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
@@ -39,7 +44,9 @@ export function MessageBubble({
   onDelete,
   onReply,
   onEdit,
-  encryptFn
+  encryptFn,
+  onRequestApproval,
+  footer
 }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
@@ -108,9 +115,11 @@ export function MessageBubble({
     if (!text || !encryptFn || !onEdit) return;
     setSaving(true);
     try {
-      const { ciphertext, iv } = await encryptFn(text);
-      await onEdit(ciphertext, iv);
+      await onEdit(await encryptFn(text));
       setEditing(false);
+    } catch (err) {
+      // Cancelled at the "Send anyway?" prompt: keep editing
+      if (!(err instanceof EditCancelledError)) throw err;
     } finally {
       setSaving(false);
     }
@@ -202,6 +211,7 @@ export function MessageBubble({
                 ))}
               </div>
             )}
+            {footer}
 
             {/* Text content */}
             {editing ? (
@@ -250,6 +260,10 @@ export function MessageBubble({
             {/* Timestamp row */}
             <div className={cn("flex items-center gap-1.5 mt-1.5", isMine ? "justify-end" : "justify-start")}>
               {message.isEdited && <span className="text-[10px] text-slate-500 italic">edited</span>}
+              {/* The text doesn't match what the sender's app committed to: it can't be reported with proof */}
+              {message.type === "text" && message.franking?.commitment && message.frankVerified === false && !message.decryptionFailed && (
+                <span className="text-[10px] text-amber-400" title="This message's proof didn't check out. If it's a problem, report it with a screenshot.">⚠ couldn't verify</span>
+              )}
               <span className="text-[10px] text-slate-500">{timeStr}</span>
               {isMine && <Lock className="h-2.5 w-2.5 text-emerald-500/70" />}
             </div>
@@ -334,6 +348,22 @@ export function MessageBubble({
                     />
                   )}
                 </div>
+              )}
+
+              {/* Ask for design approval */}
+              {onRequestApproval && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTouchActions(false);
+                    onRequestApproval();
+                  }}
+                  className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-300 hover:bg-slate-700 transition bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-md shrink-0"
+                  title="Ask the customer to approve this design"
+                  aria-label="Ask for approval"
+                >
+                  <FileCheck2 className="h-3 w-3" />
+                </button>
               )}
 
               {/* Reply */}

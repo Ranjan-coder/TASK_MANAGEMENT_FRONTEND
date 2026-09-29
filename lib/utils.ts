@@ -35,3 +35,29 @@ export function getInitials(name?: string): string {
     .substring(0, 2)
     .toUpperCase();
 }
+
+/**
+ * Where a signed-in user should land. Accounts that must change their password
+ * go straight to Settings → Security; customers start on the portal home;
+ * marketing (no task access) starts in the content manager.
+ */
+export function homeRouteFor(user?: { role?: string; mustChangePassword?: boolean } | null): string {
+  if (!user) return "/login";
+  if (user.mustChangePassword) return "/settings?section=security";
+  if (user.role === "customer") return "/home";
+  if (user.role === "marketing") return "/admin/campaigns";
+  return "/dashboard";
+}
+
+// Staff-app areas that customers and marketing accounts cannot use
+export const RESTRICTED_FOR_LIMITED_ROLES = ["/dashboard", "/tasks", "/users", "/audit-logs"];
+
+// Customer-portal-only areas
+export const CUSTOMER_ONLY_ROUTES = ["/home"];
+
+// Content manager (campaigns, catalog): superadmin, admin, marketing only
+export const CONTENT_MANAGER_ROUTES = ["/admin"];
+export const CONTENT_MANAGER_ROLES = ["superadmin", "admin", "marketing"];
+
+// Project set-up: admins only
+export const ADMIN_ONLY_ROUTES = ["/admin/projects", "/admin/reply-times", "/admin/reports", "/admin/moderation", "/admin/overview", "/admin/performance", "/admin/customers", "/admin/privacy", "/admin/payments", "/admin/referrals"];

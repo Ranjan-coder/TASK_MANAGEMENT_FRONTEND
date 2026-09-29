@@ -4,13 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
-import { fetchConversations, createGroup, fetchPublicKey } from "@/lib/api/chat.api";
-import {
-  generateGroupKey,
-  deriveSessionKey,
-  wrapGroupKey
-} from "@/lib/crypto/e2e";
-import { ensureUserKeys } from "@/lib/crypto/keyStore";
+import { fetchConversations, createGroup } from "@/lib/api/chat.api";
+import { createInitialGroupKeys } from "@/lib/crypto/conversationKeys";
 import { X, Users, Search, Plus, Loader2, ShieldCheck, Lock } from "lucide-react";
 import { toast } from "sonner";
 
@@ -72,43 +67,15 @@ export function GroupCreateModal({ onClose }: Props) {
 
     setCreating(true);
     try {
-      // 1. Ensure current user's keys are active and published to backend
-      const { privateKey: myPrivateKey, publicKeyB64: myPublicKey } = await ensureUserKeys(user._id);
-
-      // 2. Generate a fresh group AES-256-GCM key
-      const groupKey = await generateGroupKey();
-
-      // 3. Encrypt the group key for each member
-      const encryptedGroupKeys: Record<string, string> = {};
-
-      // A) Encrypt for self
-      const selfSession = await deriveSessionKey(myPrivateKey, myPublicKey);
-      encryptedGroupKeys[user._id] = await wrapGroupKey(groupKey, selfSession);
-
-      // B) Encrypt for selected members
-      const membersWithoutKeys: string[] = [];
-
-      for (const member of selected) {
-        let memberPublicKey = member.publicKey;
-        if (!memberPublicKey) {
-          try {
-            const keyInfo = await fetchPublicKey(member._id);
-            memberPublicKey = keyInfo?.publicKey;
-          } catch {}
-        }
-
-        if (memberPublicKey) {
-          try {
-            const sessionKey = await deriveSessionKey(myPrivateKey, memberPublicKey);
-            encryptedGroupKeys[member._id] = await wrapGroupKey(groupKey, sessionKey);
-          } catch (err) {
-            console.warn(`Failed to encrypt key for member ${member.name}:`, err);
-            membersWithoutKeys.push(member.name || member.email);
-          }
-        } else {
-          membersWithoutKeys.push(member.name || member.email);
-        }
-      }
+      // Fresh group key (version 1), wrapped for me and every member who has
+      // set up chat. Others receive it automatically once they have keys.
+      const { keys: encryptedGroupKeys, missing } = await createInitialGroupKeys(
+        user._id,
+        selected.map((m: any) => ({ _id: m._id, publicKey: m.publicKey, keyVersion: m.keyVersion }))
+      );
+      const membersWithoutKeys = selected
+        .filter((m: any) => missing.includes(m._id))
+        .map((m: any) => m.name || m.email);
 
       const conv = await createGroup({
         type: "group",

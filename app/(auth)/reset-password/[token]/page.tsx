@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { authApi } from "../../../../lib/api/auth.api";
+import { prepareNewPassword } from "../../../../lib/auth/credentials";
+import { passwordPolicyError } from "../../../../lib/crypto/passwordKeys";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -23,13 +25,14 @@ export default function ResetPasswordPage() {
     if (password !== confirm) {
       return setError("Passwords do not match.");
     }
-    if (password.length < 8) {
+    if (passwordPolicyError(password)) {
       return setError("Password must be at least 8 characters.");
     }
 
     setLoading(true);
     try {
-      await authApi.resetPassword(token, { password });
+      const { authKey, kdfSalt } = await prepareNewPassword(password);
+      await authApi.resetPassword(token, { authKey, kdfSalt });
       setSuccess(true);
       setTimeout(() => router.push("/login"), 2500);
     } catch (err: unknown) {

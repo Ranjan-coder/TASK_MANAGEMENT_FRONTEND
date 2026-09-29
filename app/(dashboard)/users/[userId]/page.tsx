@@ -117,7 +117,7 @@ export default function UserDetailPage() {
         {isSuperAdmin && user._id !== currentUser._id && (
           <div className="mt-5 pt-5 border-t border-slate-700 flex items-center gap-3">
             <p className="text-slate-400 text-sm">Change Role:</p>
-            {["user", "admin", "superadmin"].map((role) => (
+            {["customer", "user", "marketing", "admin", "superadmin"].map((role) => (
               <button
                 key={role}
                 onClick={() => roleMutation.mutate(role)}

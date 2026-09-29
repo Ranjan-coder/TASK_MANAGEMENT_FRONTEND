@@ -68,6 +68,17 @@ export const exportPublicKeyFromPrivateKey = async (privateKey: CryptoKey): Prom
   return bufToB64(spki);
 };
 
+/** PKCS#8 export of an (extractable) ECDH private key, base64 — only ever stored encrypted. */
+export const exportPrivateKeyPkcs8 = async (privateKey: CryptoKey): Promise<string> =>
+  bufToB64(await crypto.subtle.exportKey("pkcs8", privateKey));
+
+/** Imports a PKCS#8 ECDH private key. Local copies are imported non-extractable. */
+export const importPrivateKeyPkcs8 = async (pkcs8B64: string, extractable = false): Promise<CryptoKey> =>
+  crypto.subtle.importKey("pkcs8", toBuffer(b64ToBuf(pkcs8B64)), ECDH_PARAMS, extractable, [
+    "deriveKey",
+    "deriveBits"
+  ]);
+
 // ── Session Key Derivation ────────────────────────────────────────────────────
 
 export const deriveSessionKey = async (

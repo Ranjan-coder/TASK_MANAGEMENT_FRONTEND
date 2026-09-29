@@ -1,16 +1,60 @@
 /**
  * lib/crypto/keyStore.ts
  *
- * Persists the user's ECDH private key in IndexedDB.
- * The private key NEVER leaves the browser — it is NOT sent to the server.
+ * Local (this browser) copy of the user's chat keys, in IndexedDB:
+ *   keyring:<userId>  → every private key version (non-extractable CryptoKeys)
+ *   wrapkey:<userId>  → the password-derived wrapKey (non-extractable), used to
+ *                       update the encrypted key bundle when a key is added
  *
- * Also maintains an in-memory session key cache so we don't re-run ECDH
- * on every message (expensive). Cache key: `dm:<otherUserId>` or `group:<convId>`.
+ *   bundlecache:<userId> → last encrypted bundle seen here (lets this device
+ *                       restore older keys after a password reset elsewhere)
+ *   meta:<userId>     → small flags (e.g. whether a recovery key is set up)
+ *
+ * The authoritative copy is the encrypted bundle on the server (keyBundle.ts);
+ * this is a cache so chats open without re-entering the password. It is wiped
+ * on logout.
+ *
+ * On devices the user doesn't trust (shared/office computers) nothing is
+ * written to IndexedDB: keys live in memory for the open tab only.
+ *
+ * Also keeps an in-memory cache of derived session/group keys.
  */
 
 const DB_NAME = "chat_keys";
 const DB_VERSION = 1;
 const STORE_NAME = "private_keys";
+
+export interface LocalKey {
+  version: number;
+  privateKey: CryptoKey;
+  publicKeyB64: string;
+}
+
+// ── Trusted vs memory-only storage ────────────────────────────────────────────
+
+// Session cookie (no expiry): shared across tabs, gone when the browser closes
+const MEMORY_ONLY_COOKIE = "bonito_keys_memory_only";
+const memoryStore = new Map<string, unknown>();
+
+const isMemoryOnly = (): boolean => {
+  try {
+    return document.cookie.split("; ").some((c) => c === `${MEMORY_ONLY_COOKIE}=1`);
+  } catch {
+    return false;
+  }
+};
+
+/** Called at sign-in with the user's "trust this device" choice. */
+export const setKeyStorageTrusted = (trusted: boolean): void => {
+  try {
+    document.cookie = trusted
+      ? `${MEMORY_ONLY_COOKIE}=; path=/; max-age=0; samesite=strict`
+      : `${MEMORY_ONLY_COOKIE}=1; path=/; samesite=strict`;
+  } catch {
+    /* no document (SSR) */
+  }
+  if (!trusted) memoryStore.clear();
+};
 
 // ── IndexedDB helpers ─────────────────────────────────────────────────────────
 
@@ -24,7 +68,11 @@ const openDB = (): Promise<IDBDatabase> =>
     req.onerror = () => reject(req.error);
   });
 
-const idbPut = async (key: string, value: any): Promise<void> => {
+const idbPut = async (key: string, value: unknown): Promise<void> => {
+  if (isMemoryOnly()) {
+    memoryStore.set(key, value);
+    return;
+  }
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -34,7 +82,8 @@ const idbPut = async (key: string, value: any): Promise<void> => {
   });
 };
 
-const idbGet = async <T = any>(key: string): Promise<T | null> => {
+const idbGet = async <T = unknown>(key: string): Promise<T | null> => {
+  if (isMemoryOnly()) return (memoryStore.get(key) as T) ?? null;
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
@@ -45,6 +94,10 @@ const idbGet = async <T = any>(key: string): Promise<T | null> => {
 };
 
 const idbDelete = async (key: string): Promise<void> => {
+  if (isMemoryOnly()) {
+    memoryStore.delete(key);
+    return;
+  }
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -54,123 +107,117 @@ const idbDelete = async (key: string): Promise<void> => {
   });
 };
 
-// ── Private & Public key storage ──────────────────────────────────────────────
-
 /**
- * Save the user's ECDH private key to IndexedDB.
- * Call this once after key generation or rotation.
+ * Deletes every entry except pre-bundle keys ("privkey:"/"pubkey:") that have
+ * not been migrated yet — they exist nowhere else, and establishChatKeys()
+ * moves them into the encrypted bundle (then deletes them) at the next sign-in.
  */
-export const savePrivateKey = async (userId: string, privateKey: CryptoKey): Promise<void> => {
-  await idbPut(`privkey:${userId}`, privateKey);
+const idbClearExceptUnmigrated = async (): Promise<void> => {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const req = tx.objectStore(STORE_NAME).openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) return;
+      const key = String(cursor.key);
+      if (!key.startsWith("privkey:") && !key.startsWith("pubkey:")) cursor.delete();
+      cursor.continue();
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 };
 
-/**
- * Load the user's ECDH private key from IndexedDB.
- * Returns null if the key doesn't exist (user needs to generate keys).
- */
-export const loadPrivateKey = async (userId: string): Promise<CryptoKey | null> => {
-  return idbGet<CryptoKey>(`privkey:${userId}`);
+// ── Keyring ───────────────────────────────────────────────────────────────────
+
+export const saveKeyring = async (userId: string, keys: LocalKey[]): Promise<void> => {
+  await idbPut(`keyring:${userId}`, keys);
 };
 
-/**
- * Save the user's base64 SPKI public key to IndexedDB for offline fast lookup.
- */
-export const savePublicKey = async (userId: string, publicKeyB64: string): Promise<void> => {
-  await idbPut(`pubkey:${userId}`, publicKeyB64);
+export const loadKeyring = async (userId: string): Promise<LocalKey[] | null> => {
+  const keys = await idbGet<LocalKey[]>(`keyring:${userId}`);
+  return keys && keys.length > 0 ? keys : null;
 };
 
-/**
- * Load the user's base64 SPKI public key from IndexedDB.
- */
-export const loadPublicKey = async (userId: string): Promise<string | null> => {
-  return idbGet<string>(`pubkey:${userId}`);
+export const saveWrapKey = async (userId: string, wrapKey: CryptoKey): Promise<void> => {
+  await idbPut(`wrapkey:${userId}`, wrapKey);
 };
 
-/**
- * Delete the user's keys (called on key rotation or logout).
- */
-export const deletePrivateKey = async (userId: string): Promise<void> => {
+export const loadWrapKey = async (userId: string): Promise<CryptoKey | null> =>
+  idbGet<CryptoKey>(`wrapkey:${userId}`);
+
+export interface SealedBundle {
+  ciphertext: string;
+  iv: string;
+}
+
+export const saveBundleCache = async (userId: string, bundle: SealedBundle): Promise<void> => {
+  await idbPut(`bundlecache:${userId}`, bundle);
+};
+
+export const loadBundleCache = async (userId: string): Promise<SealedBundle | null> =>
+  idbGet<SealedBundle>(`bundlecache:${userId}`);
+
+export interface KeyMeta {
+  hasRecoveryKey: boolean;
+}
+
+export const saveKeyMeta = async (userId: string, meta: KeyMeta): Promise<void> => {
+  await idbPut(`meta:${userId}`, meta);
+};
+
+export const loadKeyMeta = async (userId: string): Promise<KeyMeta | null> => idbGet<KeyMeta>(`meta:${userId}`);
+
+/** Newest key version, used for everything new (sending, wrapping). */
+export const latestKey = (keys: LocalKey[]): LocalKey =>
+  keys.reduce((a, b) => (b.version > a.version ? b : a));
+
+// ── Pre-bundle (legacy) single key, read once to migrate into the bundle ─────
+
+export const loadLegacyPrivateKey = async (userId: string): Promise<CryptoKey | null> =>
+  idbGet<CryptoKey>(`privkey:${userId}`);
+
+export const deleteLegacyKeys = async (userId: string): Promise<void> => {
   await idbDelete(`privkey:${userId}`);
   await idbDelete(`pubkey:${userId}`);
-  sessionKeyCache.clear();
 };
 
-/**
- * Ensure the user has valid E2E keys in IndexedDB AND that their public key
- * is published to the backend database.
- *
- * If private key is present but public key is not published to MongoDB,
- * this will automatically export the public key from the private key and publish it.
- * If no keys exist, it generates a fresh pair, stores it locally, and publishes it.
- */
-export const ensureUserKeys = async (
-  userId: string
-): Promise<{ privateKey: CryptoKey; publicKeyB64: string }> => {
-  // Dynamically import to avoid circular references at module evaluation time
-  const { generateKeyPair, exportPublicKeyFromPrivateKey } = await import("./e2e");
-  const { publishPublicKey, fetchPublicKey } = await import("@/lib/api/chat.api");
-  const { useAuthStore } = await import("@/store/authStore");
-
-  let privKey = await loadPrivateKey(userId);
-  let pubKeyB64 = await loadPublicKey(userId);
-
-  if (!privKey) {
-    // No local key material at all — the only case where generating a fresh
-    // keypair is safe (there is no existing identity to lose).
-    const pair = await generateKeyPair();
-    privKey = pair.privateKey;
-    pubKeyB64 = pair.publicKeyB64;
-    await savePrivateKey(userId, privKey);
-    await savePublicKey(userId, pubKeyB64);
-  } else if (!pubKeyB64) {
-    // A private key exists but its cached public key is missing — recover it
-    // by re-deriving from the private key. IMPORTANT: if this derivation
-    // fails, it must propagate (not be swallowed into generating a new
-    // keypair) — silently replacing a perfectly good private key here would
-    // permanently break decryption of every existing DM session for this
-    // user, including their own previously sent messages.
-    pubKeyB64 = await exportPublicKeyFromPrivateKey(privKey);
-    await savePublicKey(userId, pubKeyB64);
-  }
-
-  // 3. Ensure public key is published to backend
+/** Removes the chat keys from this browser (logout, "sign out this device"). */
+export const wipeLocalKeys = async (): Promise<void> => {
+  sessionKeyCache.clear();
+  memoryStore.clear();
   try {
-    const serverKey = await fetchPublicKey(userId);
-    if (!serverKey?.publicKey || serverKey.publicKey !== pubKeyB64) {
-      await publishPublicKey(pubKeyB64);
-    }
+    await idbClearExceptUnmigrated();
   } catch {
-    // 404 means not yet published to backend — publish now
-    try {
-      await publishPublicKey(pubKeyB64);
-    } catch (pubErr) {
-      console.error("Failed to publish public key to server:", pubErr);
-    }
+    // IndexedDB unavailable (private mode) — nothing persisted anyway
   }
+};
 
-  // 4. Update authStore user object if loaded
-  const authState = useAuthStore.getState();
-  if (authState.user && authState.user._id === userId && authState.user.publicKey !== pubKeyB64) {
-    authState.setUser({ ...authState.user, publicKey: pubKeyB64 });
+/** Thrown when chat keys are not available on this device yet. */
+export class ChatKeysLockedError extends Error {
+  constructor() {
+    super("Chat keys are locked on this device");
+    this.name = "ChatKeysLockedError";
   }
+}
 
-  return { privateKey: privKey, publicKeyB64: pubKeyB64 };
+export const requireKeyring = async (userId: string): Promise<LocalKey[]> => {
+  const keys = await loadKeyring(userId);
+  if (!keys) throw new ChatKeysLockedError();
+  return keys;
 };
 
 // ── Session key cache (in-memory) ─────────────────────────────────────────────
 
 /**
- * In-memory cache of derived ECDH session keys.
- * Avoids running the expensive ECDH + HKDF derivation on every message.
- *
- * Cache key format:
- *   - DMs:    `dm:<otherUserId>`
- *   - Groups: `group:<conversationId>`
+ * Derived keys cached for this page session, so ECDH/unwrap runs once per key:
+ *   dm:<otherUserId>:<myVersion>:<theirVersion>
+ *   group:<conversationId>:<keyVersion>
  */
 const sessionKeyCache = new Map<string, CryptoKey>();
 
-export const getCachedSessionKey = (cacheKey: string): CryptoKey | undefined =>
-  sessionKeyCache.get(cacheKey);
+export const getCachedSessionKey = (cacheKey: string): CryptoKey | undefined => sessionKeyCache.get(cacheKey);
 
 export const setCachedSessionKey = (cacheKey: string, key: CryptoKey): void => {
   sessionKeyCache.set(cacheKey, key);
@@ -179,20 +226,3 @@ export const setCachedSessionKey = (cacheKey: string, key: CryptoKey): void => {
 export const clearSessionKeyCache = (): void => {
   sessionKeyCache.clear();
 };
-
-/**
- * Build the cache key for a DM session (between current user and another user).
- *
- * Includes the peer's keyVersion so that once fresher conversation data is
- * fetched (e.g. on reload or reopening the conversation) after the peer
- * rotates their encryption keys, the old session key — derived from their
- * previous public key — is never reused. Instead the version bump produces a
- * new cache key, misses, and forces a correct re-derivation.
- */
-export const dmCacheKey = (otherUserId: string, keyVersion?: number) =>
-  `dm:${otherUserId}:v${keyVersion ?? 0}`;
-
-/**
- * Build the cache key for a group session.
- */
-export const groupCacheKey = (conversationId: string) => `group:${conversationId}`;

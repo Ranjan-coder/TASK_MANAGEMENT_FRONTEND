@@ -13,29 +13,29 @@ import {
   deleteMessage,
   editMessage
 } from "@/lib/api/chat.api";
+import { encryptTextWith, decryptTextWith, type EncryptedText } from "@/lib/crypto/conversationKeys";
+import { ChatKeysLockedError } from "@/lib/crypto/keyStore";
 import {
-  deriveSessionKey,
-  encryptMessage,
-  decryptMessage,
-  unwrapGroupKey,
-  computeFingerprint
-} from "@/lib/crypto/e2e";
-import {
-  loadPrivateKey,
-  ensureUserKeys,
-  getCachedSessionKey,
-  setCachedSessionKey,
-  dmCacheKey,
-  groupCacheKey
-} from "@/lib/crypto/keyStore";
-import { useJoinConversation, useSendTyping } from "@/hooks/useChat";
+  ConversationCrypto,
+  registerConversationCrypto,
+  rotateConversationGroupKey,
+  type SendKey
+} from "@/lib/crypto/conversationKeys";
+import { useJoinConversation, useSendTyping, CHAT_KEYS_UPDATED_EVENT } from "@/hooks/useChat";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { FileUploadPreview } from "../components/FileUploadPreview";
 import { GroupInfoPanel } from "../components/GroupInfoPanel";
 import { KeySetupWizard } from "../components/KeySetupWizard";
+import { ChatUnlock } from "../components/ChatUnlock";
 import { SafetyNumbersDialog } from "../components/SafetyNumbersDialog";
-import { Conversation, Message } from "@/types/chat";
+import { ProjectChatActions, RatingPrompt } from "../components/ProjectChatActions";
+import { useProjectApprovals, useProjectStage, ApprovalCard, RequestApprovalDialog } from "../components/ProjectWorkflow";
+import { extrasApi, stageLabel, type Timeline } from "@/lib/api/projectExtras.api";
+import { useOffensiveConfirm, ModerationWarningPopup } from "../components/ModerationUI";
+import { checkMessage, recordPrevented, loadLexicon } from "@/lib/moderation/lexicon";
+import { EditCancelledError, type ModerationFlag } from "@/lib/crypto/conversationKeys";
+import { Conversation, Message, KeyRef } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, Users, Lock, Info, ShieldCheck, ShieldAlert, Key } from "lucide-react";
 import { toast } from "sonner";
@@ -61,7 +61,11 @@ export default function ConversationPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
+  // Resolves the right key for each message (versioned keys, see conversationKeys.ts)
+  const [convCrypto, setConvCrypto] = useState<ConversationCrypto | null>(null);
+  // Key for new messages; null while this user has no key for the conversation yet
+  const [sendKey, setSendKey] = useState<SendKey | null>(null);
+  const [keysLocked, setKeysLocked] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [showKeySetup, setShowKeySetup] = useState(false);
   const [showSafetyNumbers, setShowSafetyNumbers] = useState(false);
@@ -81,69 +85,18 @@ export default function ConversationPage() {
   const typing = typingUsers[conversationId];
   const typingNames = typing ? Array.from(typing) : [];
 
-  // ── Derive session key ──────────────────────────────────────────────────────
-  const deriveKey = useCallback(
-    async (conversation: Conversation): Promise<CryptoKey | null> => {
+  // ── Build conversation crypto ───────────────────────────────────────────────
+  const buildCrypto = useCallback(
+    async (conversation: Conversation): Promise<ConversationCrypto | null> => {
       if (!user) return null;
-
-      // Fast path: session key already derived for this conversation — skip
-      // the IndexedDB private-key lookup (and any network calls) entirely.
-      // Without this check, switching between already-unlocked conversations
-      // paid an IndexedDB round-trip every time for no reason.
-      const other =
-        conversation.type === "dm"
-          ? conversation.members.find((m) => m.user._id !== user._id)
-          : undefined;
-      const cacheKey =
-        conversation.type === "dm" && other
-          ? dmCacheKey(other.user._id, other.user.keyVersion)
-          : groupCacheKey(conversation._id);
-      const cachedUpfront = getCachedSessionKey(cacheKey);
-      if (cachedUpfront) return cachedUpfront;
-
-      let myPrivateKey = await loadPrivateKey(user._id);
-      if (!myPrivateKey) {
-        try {
-          const ensured = await ensureUserKeys(user._id);
-          myPrivateKey = ensured.privateKey;
-        } catch {
-          return null;
-        }
-      }
-      if (!myPrivateKey) return null;
-
-      if (conversation.type === "dm") {
-        if (!other) return null;
-        let otherPubKey = other.user.publicKey;
-        if (!otherPubKey) {
-          try {
-            const { fetchPublicKey } = await import("@/lib/api/chat.api");
-            const keyInfo = await fetchPublicKey(other.user._id);
-            otherPubKey = keyInfo?.publicKey;
-          } catch {}
-        }
-        if (!otherPubKey) return null;
-        const key = await deriveSessionKey(myPrivateKey, otherPubKey);
-        setCachedSessionKey(cacheKey, key);
-        return key;
-      } else {
-        const myWrappedKey = conversation.groupKeys?.[user._id];
-        if (!myWrappedKey) return null;
-
-        const creatorMember = conversation.members.find((m) => m.user._id === conversation.createdBy);
-        let creatorPublicKey = creatorMember?.user?.publicKey;
-        if (!creatorPublicKey && conversation.createdBy === user._id) {
-          try {
-            const ensured = await ensureUserKeys(user._id);
-            creatorPublicKey = ensured.publicKeyB64;
-          } catch {}
-        }
-        if (!creatorPublicKey) return null;
-
-        const creatorSession = await deriveSessionKey(myPrivateKey, creatorPublicKey);
-        const groupKey = await unwrapGroupKey(myWrappedKey, creatorSession);
-        setCachedSessionKey(cacheKey, groupKey);
-        return groupKey;
+      try {
+        const c = await ConversationCrypto.create(conversation, user._id);
+        registerConversationCrypto(c);
+        setKeysLocked(false);
+        return c;
+      } catch (err) {
+        if (err instanceof ChatKeysLockedError) setKeysLocked(true);
+        return null;
       }
     },
     [user]
@@ -151,18 +104,8 @@ export default function ConversationPage() {
 
   // ── Decrypt all messages ────────────────────────────────────────────────────
   const decryptAll = useCallback(
-    async (msgs: Message[], key: CryptoKey): Promise<Message[]> =>
-      Promise.all(
-        msgs.map(async (msg) => {
-          if (msg.type === "system" || msg.isDeleted || !msg.ciphertext || !msg.iv) return msg;
-          try {
-            const plain = await decryptMessage(msg.ciphertext, msg.iv, key);
-            return { ...msg, decryptedContent: plain };
-          } catch {
-            return { ...msg, decryptedContent: "🔒 Unable to decrypt", decryptionFailed: true };
-          }
-        })
-      ),
+    async (msgs: Message[], c: ConversationCrypto | null): Promise<Message[]> =>
+      c ? Promise.all(msgs.map((m) => c.decrypt(m))) : msgs,
     []
   );
 
@@ -187,15 +130,11 @@ export default function ConversationPage() {
         ]);
         setConv(convData);
 
-        const key = await deriveKey(convData);
-        if (!key) {
-          // Check if it's because private key doesn't exist
-          const privKey = await loadPrivateKey(user!._id);
-          if (!privKey) setShowKeySetup(true);
-        }
-        setSessionKey(key);
+        const c = await buildCrypto(convData);
+        setConvCrypto(c);
+        setSendKey(c ? await c.sendKey() : null);
 
-        const decrypted = key ? await decryptAll(msgData.messages, key) : msgData.messages;
+        const decrypted = await decryptAll(msgData.messages, c);
         setMessages(conversationId, decrypted);
         setHasMore(msgData.hasMore);
         setNextCursor(msgData.nextCursor);
@@ -205,13 +144,57 @@ export default function ConversationPage() {
           markRead(decrypted[decrypted.length - 1]._id).catch(() => {});
           markConversationRead(conversationId);
         }
+
+        // Give group keys to members who lack them (new members, new devices,
+        // password resets). Runs quietly in the background.
+        if (c && convData.type === "group") {
+          c.healGroupKeys().catch((err) => console.warn("Group key sharing skipped:", err));
+        }
+
+        // Project chats start with a key made by the admin who set them up (not
+        // a member), and get a new key after someone is removed. The first staff
+        // member of the team to open the chat replaces it, so only the team can
+        // read what's sent from then on. Everyone gets it via "chat:rekey".
+        const mine = convData.members.find((m) => m.user._id === user._id);
+        if (c && convData.project && convData.rekeyRequested && mine?.role === "admin" && user.role !== "customer") {
+          rotateConversationGroupKey(
+            convData,
+            user._id,
+            convData.members.map((m) => ({ _id: m.user._id, publicKey: m.user.publicKey, keyVersion: m.user.keyVersion }))
+          ).catch((err) => {
+            // 409: another team member replaced it first — fine
+            if (err?.response?.status !== 409) console.warn("Project key replacement failed:", err);
+          });
+        }
       } catch {
         toast.error("Failed to load conversation");
       } finally {
         setLoading(false);
       }
     })();
-  }, [conversationId, user?._id]);
+  }, [conversationId, user?._id, keysLocked]);
+
+  // ── Keys changed (rotation, or someone shared a key with us) ────────────────
+  useEffect(() => {
+    const onKeysUpdated = async (e: Event) => {
+      if ((e as CustomEvent).detail?.conversationId !== conversationId || !user) return;
+      try {
+        const fresh = await fetchConversation(conversationId);
+        setConv(fresh);
+        const c = await buildCrypto(fresh);
+        setConvCrypto(c);
+        setSendKey(c ? await c.sendKey() : null);
+        if (c) {
+          // Retry messages we couldn't read before
+          const current = useChatStore.getState().messages[conversationId] || [];
+          const retried = await Promise.all(current.map((m) => (m.decryptionFailed ? c.decrypt(m) : m)));
+          setMessages(conversationId, retried);
+        }
+      } catch {}
+    };
+    window.addEventListener(CHAT_KEYS_UPDATED_EVENT, onKeysUpdated);
+    return () => window.removeEventListener(CHAT_KEYS_UPDATED_EVENT, onKeysUpdated);
+  }, [conversationId, user, buildCrypto, setMessages]);
 
   // ── Scroll on new messages ──────────────────────────────────────────────────
   // Jump instantly when a conversation is first opened (avoids animating through
@@ -247,7 +230,7 @@ export default function ConversationPage() {
         setLoadingMore(true);
         try {
           const data = await fetchMessages(conversationId, nextCursor);
-          const decrypted = sessionKey ? await decryptAll(data.messages, sessionKey) : data.messages;
+          const decrypted = await decryptAll(data.messages, convCrypto);
           prependMessages(conversationId, decrypted);
           setHasMore(data.hasMore);
           setNextCursor(data.nextCursor);
@@ -259,7 +242,7 @@ export default function ConversationPage() {
     );
     observer.observe(topSentinelRef.current);
     return () => observer.disconnect();
-  }, [hasMore, nextCursor, loadingMore, sessionKey, conversationId]);
+  }, [hasMore, nextCursor, loadingMore, convCrypto, conversationId]);
 
   // ── Send message ────────────────────────────────────────────────────────────
   // Sends are chained onto this ref so they hit the server strictly in the
@@ -270,21 +253,55 @@ export default function ConversationPage() {
   // display can't fix that after the fact, since the server itself recorded
   // the wrong order — the sends have to be serialized at the source.
   const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const { confirmOffensive, offensiveDialog } = useOffensiveConfirm();
+
+  // ── Project workflow: live stage + design approvals ─────────────────────────
+  const isCustomer = user?.role === "customer";
+  const refOf = (v: unknown) => (!v ? null : typeof v === "string" ? v : (v as { _id?: string })._id ?? null);
+  const isTeamLead = Boolean(
+    conv?.project && user && [conv.project.leadDesigner, conv.project.backupDesigner, conv.project.manager].some((u) => refOf(u) === user._id)
+  );
+  const { approvalFor, putApproval } = useProjectApprovals(conversationId, Boolean(conv?.project));
+  const [approvalTarget, setApprovalTarget] = useState<Message | null>(null);
+  useProjectStage(
+    conversationId,
+    useCallback((t: Timeline) => setConv((c) => (c?.project ? { ...c, project: { ...c.project, ...t } } : c)), [])
+  );
+  const isProjectChat = Boolean(conv?.project);
+  useEffect(() => {
+    if (isProjectChat) loadLexicon(); // warm the word list so the first send isn't delayed
+  }, [isProjectChat]);
 
   const handleSend = useCallback(
-    (text: string) => {
-      if (!text.trim() || !sessionKey || !user) return Promise.resolve();
+    async (text: string): Promise<boolean | void> => {
+      if (!text.trim() || !sendKey || !user) return;
       const plaintext = text.trim();
       const currentReplyTo = replyTo;
 
+      // Project chats: on-device abuse check before anything is encrypted or sent
+      let moderation: ModerationFlag | undefined;
+      if (conv?.project) {
+        const scan = await checkMessage(plaintext);
+        if (scan.hitCount > 0 && scan.severity) {
+          if (!(await confirmOffensive(scan))) {
+            recordPrevented();
+            return false; // keep the text in the box
+          }
+          moderation = { flagged: true, severity: scan.severity, hitCount: Math.min(scan.hitCount, 20) };
+        }
+      }
+
       const next = sendQueueRef.current.catch(() => {}).then(async () => {
         try {
-          const { ciphertext, iv } = await encryptMessage(plaintext, sessionKey);
+          const { ciphertext, iv, keyRef, franking, frankingKey } = await encryptTextWith(sendKey, plaintext);
           const saved = await sendMessage(conversationId, {
             ciphertext,
             iv,
             type: "text",
-            replyTo: currentReplyTo?._id
+            replyTo: currentReplyTo?._id,
+            keyRef,
+            franking,
+            moderation
           });
 
           // Show it immediately using the server's confirmed response instead
@@ -294,7 +311,13 @@ export default function ConversationPage() {
           // just encrypted it), so there's nothing left to decrypt either.
           // appendMessage dedups by _id, so the later socket echo of this same
           // message is a harmless no-op.
-          useChatStore.getState().appendMessage(conversationId, { ...saved, decryptedContent: plaintext });
+          useChatStore.getState().appendMessage(conversationId, {
+            ...saved,
+            decryptedContent: plaintext,
+            cryptoKey: sendKey.key,
+            frankingKey,
+            frankVerified: Boolean(saved.franking?.commitment)
+          });
           if (conv) {
             useChatStore.getState().upsertConversation({
               ...conv,
@@ -310,26 +333,37 @@ export default function ConversationPage() {
       });
 
       sendQueueRef.current = next;
-      return next;
+      await next;
     },
-    [sessionKey, conversationId, user, replyTo, conv]
+    [sendKey, conversationId, user, replyTo, conv, confirmOffensive]
   );
 
   // ── Edit message ────────────────────────────────────────────────────────────
   const handleEdit = useCallback(
-    async (msgId: string, ciphertext: string, iv: string) => {
-      await editMessage(msgId, ciphertext, iv);
+    async (msgId: string, encrypted: EncryptedText) => {
+      const { ciphertext, iv, keyRef, franking, moderation } = encrypted;
+      await editMessage(msgId, ciphertext, iv, keyRef, franking, moderation);
       // Optimistically update store with decrypted content
       const msgs = messages[conversationId] || [];
       const msg = msgs.find((m) => m._id === msgId);
-      if (msg && sessionKey) {
+      if (msg && sendKey) {
         try {
-          const plain = await decryptMessage(ciphertext, iv, sessionKey);
-          updateMessage(conversationId, { ...msg, ciphertext, iv, decryptedContent: plain, isEdited: true });
+          const opened = await decryptTextWith(sendKey.key, ciphertext, iv, franking.commitment);
+          updateMessage(conversationId, {
+            ...msg,
+            ciphertext,
+            iv,
+            keyRef,
+            franking,
+            decryptedContent: opened.text,
+            frankingKey: opened.frankingKey,
+            frankVerified: opened.verified,
+            isEdited: true
+          });
         } catch {}
       }
     },
-    [conversationId, messages, sessionKey, updateMessage]
+    [conversationId, messages, sendKey, updateMessage]
   );
 
   // ── Delete message ──────────────────────────────────────────────────────────
@@ -368,10 +402,22 @@ export default function ConversationPage() {
   // ── Encrypt helper (passed to MessageBubble for edit) ───────────────────────
   const encryptFn = useCallback(
     async (text: string) => {
-      if (!sessionKey) throw new Error("No session key");
-      return encryptMessage(text, sessionKey);
+      if (!sendKey) throw new Error("No key for this conversation yet");
+      // Edits are checked again (a cancelled edit stays open for changes)
+      let moderation: ModerationFlag | undefined;
+      if (conv?.project) {
+        const scan = await checkMessage(text);
+        if (scan.hitCount > 0 && scan.severity) {
+          if (!(await confirmOffensive(scan))) {
+            recordPrevented();
+            throw new EditCancelledError();
+          }
+          moderation = { flagged: true, severity: scan.severity, hitCount: Math.min(scan.hitCount, 20) };
+        }
+      }
+      return { ...(await encryptTextWith(sendKey, text)), moderation };
     },
-    [sessionKey]
+    [sendKey, conv, confirmOffensive]
   );
 
   // ── Header helpers ──────────────────────────────────────────────────────────
@@ -383,6 +429,10 @@ export default function ConversationPage() {
 
   const getSubtitle = () => {
     if (!conv) return "";
+    if (conv.project) {
+      const status = { active: "", on_hold: " · On hold", completed: " · Completed" }[conv.project.status];
+      return `${stageLabel(conv.project.stage)} · ${conv.members.length} people${status}`;
+    }
     if (conv.type === "group") return `${conv.members.length} members`;
     const other = conv.members.find((m) => m.user._id !== user?._id);
     return onlineUsers.has(other?.user._id || "") ? "● Online" : "Offline";
@@ -401,11 +451,37 @@ export default function ConversationPage() {
 
   return (
     <div className="flex-1 flex min-w-0 h-full overflow-hidden">
+      {keysLocked && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <ChatUnlock onUnlocked={() => setKeysLocked(false)} />
+        </div>
+      )}
+
+      {offensiveDialog}
+      {approvalTarget && (
+        <RequestApprovalDialog
+          fileName={approvalTarget.attachments?.[0]?.originalName}
+          onCancel={() => setApprovalTarget(null)}
+          onSubmit={async (title) => {
+            try {
+              putApproval(await extrasApi.requestApproval(conversationId, approvalTarget._id, title));
+              toast.success("Approval requested — the customer has been notified");
+              setApprovalTarget(null);
+            } catch (err) {
+              toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Couldn't ask for approval");
+            }
+          }}
+        />
+      )}
+      {conv?.project && (
+        <ModerationWarningPopup conversationId={conv._id} warningAt={conv.moderation?.warningAt} active={Boolean(conv.moderation?.openIncident)} />
+      )}
+
       {/* Key setup wizard overlay */}
       {showKeySetup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
           <div className="w-full max-w-md">
-            <KeySetupWizard onComplete={() => { setShowKeySetup(false); window.location.reload(); }} />
+            <KeySetupWizard onClose={() => setShowKeySetup(false)} />
           </div>
         </div>
       )}
@@ -445,6 +521,11 @@ export default function ConversationPage() {
 
           {/* Header action buttons */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* Project chats: rate / report (customers), flag a customer (staff) */}
+            {conv?.project && user && (
+              <ProjectChatActions conversation={conv} myUserId={user._id} isCustomer={user.role === "customer"} />
+            )}
+
             {/* Safety numbers (DM only) */}
             {conv?.type === "dm" && otherMember?.user.publicKey && (
               <button
@@ -486,36 +567,31 @@ export default function ConversationPage() {
           </div>
         </div>
 
-        {/* Key not set up warning banner */}
-        {!sessionKey && !showKeySetup && (
+        {conv?.project && user?.role === "customer" && <RatingPrompt conversationId={conv._id} />}
+
+        {/* No key for this conversation yet */}
+        {!sendKey && !keysLocked && (
           <div className="mx-4 mt-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-3">
-            {conv?.type === "dm" && !otherMember?.user.publicKey ? (
-              <>
-                <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0" />
-                <div className="flex-1 min-w-0">
+            <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              {conv?.type === "dm" && !otherMember?.user.publicKey ? (
+                <>
                   <p className="text-sm text-amber-300 font-medium">
-                    Waiting for {otherMember?.user.name || "coworker"}&apos;s encryption keys
+                    Waiting for {otherMember?.user.name || "this person"} to open Chat
                   </p>
                   <p className="text-xs text-amber-400/70">
-                    This user has not yet initialized chat encryption. Once they open Chat, encrypted messaging will be ready.
+                    Messages will be end-to-end encrypted once they sign in to chat for the first time.
                   </p>
-                </div>
-              </>
-            ) : (
-              <>
-                <Key className="h-4 w-4 text-amber-400 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-amber-300 font-medium">Encryption keys required</p>
-                  <p className="text-xs text-amber-400/70">Set up your encryption keys to send and read messages</p>
-                </div>
-                <button
-                  onClick={() => setShowKeySetup(true)}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-xs font-medium transition"
-                >
-                  Set Up
-                </button>
-              </>
-            )}
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-amber-300 font-medium">Getting access to this chat</p>
+                  <p className="text-xs text-amber-400/70">
+                    The next member who opens this chat will share its encryption key with you automatically.
+                  </p>
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -551,12 +627,28 @@ export default function ConversationPage() {
                 message={msg}
                 isMine={msg.sender._id === user?._id}
                 prevMessage={convMessages[idx - 1]}
-                sessionKey={sessionKey}
+                sessionKey={msg.cryptoKey ?? null}
                 onReact={(emoji) => reactToMessage(msg._id, emoji)}
                 onDelete={(scope) => handleDelete(msg._id, scope)}
                 onReply={() => setReplyTo(msg)}
-                onEdit={msg.sender._id === user?._id ? (ct, iv) => handleEdit(msg._id, ct, iv) : undefined}
+                onEdit={msg.sender._id === user?._id ? (encrypted) => handleEdit(msg._id, encrypted) : undefined}
                 encryptFn={encryptFn}
+                onRequestApproval={
+                  conv?.project && !isCustomer && ["image", "file"].includes(msg.type) && !msg.isDeleted &&
+                  (!approvalFor(msg._id) || approvalFor(msg._id)!.status === "withdrawn")
+                    ? () => setApprovalTarget(msg)
+                    : undefined
+                }
+                footer={
+                  approvalFor(msg._id) ? (
+                    <ApprovalCard
+                      approval={approvalFor(msg._id)!}
+                      canDecide={isCustomer}
+                      canWithdraw={!isCustomer && (approvalFor(msg._id)!.requestedBy?._id === user?._id || isTeamLead)}
+                      onChange={putApproval}
+                    />
+                  ) : undefined
+                }
               />
             </div>
           ))}
@@ -590,7 +682,7 @@ export default function ConversationPage() {
         {showFileUpload && (
           <FileUploadPreview
             conversationId={conversationId}
-            sessionKey={sessionKey}
+            sendKey={sendKey}
             onUploaded={() => setShowFileUpload(false)}
             onCancel={() => setShowFileUpload(false)}
           />
@@ -599,15 +691,26 @@ export default function ConversationPage() {
         {/* Message input */}
         <MessageInput
           onSend={handleSend}
+          quickReplyFill={
+            user && user.role !== "customer" && user.role !== "marketing"
+              ? (text) => {
+                  const customer = conv?.members.find((m) => conv.project?.customers.some((c) => refOf(c) === m.user._id))?.user.name;
+                  const other = conv?.type === "dm" ? conv.members.find((m) => m.user._id !== user._id)?.user.name : undefined;
+                  return text
+                    .split("{customer}").join((customer || other || "there").split(" ")[0])
+                    .split("{designer}").join(user.name.split(" ")[0]);
+                }
+              : undefined
+          }
           onTyping={sendTyping}
           onAttachClick={() => setShowFileUpload((v) => !v)}
-          disabled={!sessionKey}
+          disabled={!sendKey}
           placeholder={
-            sessionKey
+            sendKey
               ? "Type a message…"
               : conv?.type === "dm" && !otherMember?.user.publicKey
-              ? `Waiting for ${otherMember?.user.name || "user"} to initialize keys…`
-              : "Set up encryption to chat…"
+              ? `Waiting for ${otherMember?.user.name || "user"} to open Chat…`
+              : "Waiting for access to this chat…"
           }
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
