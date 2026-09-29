@@ -5,7 +5,7 @@ import { Providers } from "./providers";
 import { PwaSetup } from "@/components/shared/PwaSetup";
 
 export const metadata: Metadata = {
-  title: "Bonito Interiors",
+  title: "Bonito Designs",
   description: "Your interior design projects, offers and designer chat.",
   applicationName: "Bonito",
   appleWebApp: { capable: true, title: "Bonito", statusBarStyle: "black-translucent" },

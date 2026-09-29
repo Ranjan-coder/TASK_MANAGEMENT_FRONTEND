@@ -79,22 +79,25 @@ export function QuickReplyButton({
         <Zap className="h-4 w-4" />
       </button>
       {open && (
-        <div className="absolute bottom-10 left-0 z-40 w-80 max-w-[85vw] rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
+        // Opens upward from the message box: never taller than the space under the top bar
+        // (screen height minus top bar + chat header + input), scrolling inside if needed.
+        <div className="absolute bottom-10 left-0 z-40 w-80 max-w-[85vw] max-h-[min(28rem,calc(100dvh-15rem))] flex flex-col rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+          <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-slate-800">
             <p className="text-xs font-semibold text-white">Quick replies</p>
             <button type="button" onClick={() => { setAdding((v) => !v); setText(currentText()); }} className="inline-flex items-center gap-1 text-[11px] text-violet-300 hover:underline">
               {adding ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />} {adding ? "Cancel" : "New"}
             </button>
           </div>
-          {adding && (
-            <div className="p-3 space-y-2 border-b border-slate-800">
-              <input value={title} onChange={(e) => setTitle(e.target.value.slice(0, 60))} placeholder="Name, e.g. Site visit" className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs" />
+          {adding ? (
+            <div className="p-3 space-y-2 overflow-y-auto">
+              <input autoFocus value={title} onChange={(e) => setTitle(e.target.value.slice(0, 60))} placeholder="Name, e.g. Site visit" className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs" />
               <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, 1000))} rows={3} placeholder="Hi {customer}, …" className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs" />
               <p className="text-[10px] text-slate-500">{"{customer}"} and {"{designer}"} are filled in with first names.</p>
               <button type="button" disabled={!title.trim() || !text.trim()} onClick={save} className="w-full py-1.5 rounded-lg bg-violet-600 text-white text-xs disabled:opacity-40">Save</button>
             </div>
-          )}
-          <ul className="max-h-64 overflow-y-auto py-1">
+          ) : (
+          // While writing a new reply the list is hidden, so the panel stays short
+          <ul className="flex-1 min-h-0 overflow-y-auto py-1">
             {isLoading ? (
               <li className="px-3 py-2 text-xs text-slate-400">Loading…</li>
             ) : (
@@ -121,7 +124,11 @@ export function QuickReplyButton({
                 </li>
               ))
             )}
+            {!isLoading && (data ?? []).length === 0 && (
+              <li className="px-3 py-2 text-xs text-slate-500">No quick replies yet. Tap New to add one.</li>
+            )}
           </ul>
+          )}
         </div>
       )}
     </div>
