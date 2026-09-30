@@ -36,10 +36,9 @@ export default function SettingsPage() {
   const setUser = useAuthStore((s) => s.setUser);
 
   const [activeSection, setActiveSection] = useState<"profile" | "security" | "sessions" | "encryption" | "reports" | "notifications" | "privacy">("profile");
+  // Department and designation are assigned by an admin (Users), so only name and photo are editable here
   const [profileForm, setProfileForm] = useState({
     name: user?.name ?? "",
-    department: user?.department ?? "",
-    designation: user?.designation ?? "",
     avatarUrl: user?.avatarUrl ?? ""
   });
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -120,7 +119,7 @@ export default function SettingsPage() {
   const profileMutation = useMutation({
     mutationFn: () =>
       usersApi.updateProfile(
-        user?.role === "customer" ? { name: profileForm.name, avatarUrl: profileForm.avatarUrl } : profileForm
+        { name: profileForm.name, avatarUrl: profileForm.avatarUrl }
       ),
     onSuccess: (r) => {
       setUser(r.data.data);
@@ -397,27 +396,22 @@ export default function SettingsPage() {
                   </div>
                   ) : (
                   <>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1.5">Department</label>
-                    <input
-                      id="settings-department"
-                      value={profileForm.department}
-                      onChange={(e) => setProfileForm((f) => ({ ...f, department: e.target.value }))}
-                      placeholder="e.g. Engineering"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition text-xs font-medium"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1.5">Designation</label>
-                    <input
-                      id="settings-designation"
-                      value={profileForm.designation}
-                      onChange={(e) => setProfileForm((f) => ({ ...f, designation: e.target.value }))}
-                      placeholder="e.g. Senior Software Engineer"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition text-xs font-medium"
-                    />
-                  </div>
+                  {[
+                    { id: "settings-department", label: "Department", value: user?.department },
+                    { id: "settings-designation", label: "Designation", value: user?.designation }
+                  ].map((f) => (
+                    <div key={f.id}>
+                      <label htmlFor={f.id} className="block text-xs font-medium text-slate-400 mb-1.5">{f.label}</label>
+                      <input
+                        id={f.id}
+                        value={f.value || "Not set"}
+                        readOnly
+                        title="Set by an admin in Users"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/40 border border-slate-800 text-slate-400 text-xs font-medium cursor-not-allowed"
+                      />
+                    </div>
+                  ))}
+                  <p className="sm:col-span-2 text-[11px] text-slate-500 -mt-2">Your department and designation are set by an admin. Ask them if something is wrong.</p>
                   </>
                   )}
                 </div>

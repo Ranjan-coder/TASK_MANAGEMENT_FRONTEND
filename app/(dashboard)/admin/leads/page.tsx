@@ -6,7 +6,9 @@ import { PhoneCall, Search, BadgeCheck, Phone, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { extrasApi, type AdminLead, type LeadStatus } from "@/lib/api/projectExtras.api";
 import { apiErrorMessage } from "@/lib/api/customerAuth.api";
-import { cn } from "@/lib/utils";
+import { cn, CONTENT_MANAGER_ROLES } from "@/lib/utils";
+import { useAuthStore } from "@/store/authStore";
+import { can } from "@/lib/permissions";
 
 const STATUSES: { value: LeadStatus; label: string; style: string }[] = [
   { value: "new", label: "New", style: "bg-sky-500/15 text-sky-200 border-sky-500/30" },
@@ -112,6 +114,9 @@ function LeadItem({ lead }: { lead: AdminLead }) {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [open, setOpen] = useState(false);
+  // Leadership and "view leads" holders read only; content managers and "work leads" holders update
+  const me = useAuthStore((s) => s.user);
+  const canWork = Boolean(me && (CONTENT_MANAGER_ROLES.includes(me.role) || can(me, "leads.manage")));
   const update = useMutation({
     mutationFn: (body: Parameters<typeof extrasApi.updateLead>[1]) => extrasApi.updateLead(lead._id, body),
     onSuccess: () => {
@@ -147,34 +152,46 @@ function LeadItem({ lead }: { lead: AdminLead }) {
             </a>
           )}
         </div>
-        <select
-          value={lead.status}
-          onChange={(e) => update.mutate({ status: e.target.value as LeadStatus })}
-          aria-label="Status"
-          disabled={update.isPending}
-          className={cn("px-2 py-1.5 rounded-lg border text-xs bg-transparent", meta.style)}
-        >
-          {STATUSES.map((s) => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
+        {canWork ? (
+          <select
+            value={lead.status}
+            onChange={(e) => update.mutate({ status: e.target.value as LeadStatus })}
+            aria-label="Status"
+            disabled={update.isPending}
+            className={cn("px-2 py-1.5 rounded-lg border text-xs bg-transparent", meta.style)}
+          >
+            {STATUSES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        ) : (
+          <span className={cn("px-2 py-1.5 rounded-lg border text-xs", meta.style)}>{meta.label}</span>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-        {lead.handledBy ? <span>Handled by {lead.handledBy.name}</span> : <button onClick={() => update.mutate({ assignToMe: true })} className="text-violet-300 hover:underline">Take this request</button>}
+        {lead.handledBy ? (
+          <span>Handled by {lead.handledBy.name}</span>
+        ) : canWork ? (
+          <button onClick={() => update.mutate({ assignToMe: true })} className="text-violet-300 hover:underline">Take this request</button>
+        ) : (
+          <span>Not picked up yet</span>
+        )}
         {lead.contactedAt && <span>Contacted {when(lead.contactedAt)}</span>}
-        <button onClick={() => setOpen(!open)} className="text-slate-300 hover:underline">
-          {lead.notes.length ? `${lead.notes.length} note${lead.notes.length > 1 ? "s" : ""}` : "Add note"}
-        </button>
+        {(canWork || lead.notes.length > 0) && (
+          <button onClick={() => setOpen(!open)} className="text-slate-300 hover:underline">
+            {lead.notes.length ? `${lead.notes.length} note${lead.notes.length > 1 ? "s" : ""}` : "Add note"}
+          </button>
+        )}
       </div>
       {open && (
         <div className="space-y-2">
           {lead.notes.map((n, i) => (
             <p key={i} className="text-xs text-slate-300"><span className="text-slate-500">{n.by?.name} · {when(n.at)}:</span> {n.text}</p>
           ))}
-          <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (note.trim()) update.mutate({ note: note.trim() }); }}>
+          {canWork && <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (note.trim()) update.mutate({ note: note.trim() }); }}>
             <input value={note} onChange={(e) => setNote(e.target.value.slice(0, 1000))} placeholder="e.g. Called — site visit Saturday" className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950/60 border border-slate-700 text-white text-xs" />
             <button type="submit" disabled={!note.trim() || update.isPending} className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs disabled:opacity-40">Save</button>
-          </form>
+          </form>}
         </div>
       )}
     </li>

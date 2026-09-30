@@ -10,6 +10,8 @@ import { slaApi } from "@/lib/api/sla.api";
 import { apiClient } from "@/lib/api/client";
 import { apiErrorMessage } from "@/lib/api/customerAuth.api";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store/authStore";
+import { can, isAdmin } from "@/lib/permissions";
 
 const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—");
 const input = "w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500";
@@ -19,6 +21,8 @@ export default function PaymentsAdminPage() {
   const [filter, setFilter] = useState<"all" | "verifying" | "overdue">("all");
   const [openId, setOpenId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  // Leadership and "payments" add-on holders see this page too (read-only / confirm only)
+  const admin = isAdmin(useAuthStore((s) => s.user));
   useEffect(() => {
     const f = new URLSearchParams(window.location.search).get("filter");
     if (f === "verifying" || f === "overdue") setFilter(f);
@@ -35,9 +39,9 @@ export default function PaymentsAdminPage() {
           <h1 className="text-2xl font-bold text-white">Payments</h1>
           <p className="text-sm text-slate-400">Customers pay by UPI or bank transfer and tell us the reference. Check it against the bank statement, then confirm to issue the receipt.</p>
         </div>
-        <button onClick={() => setShowSettings(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 text-sm text-slate-200 hover:border-slate-500">
+        {admin && <button onClick={() => setShowSettings(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 text-sm text-slate-200 hover:border-slate-500">
           <Settings2 className="h-4 w-4" /> Payment details
-        </button>
+        </button>}
       </div>
 
       <div className="flex gap-2">
@@ -95,7 +99,7 @@ export default function PaymentsAdminPage() {
       )}
 
       {openId && <ScheduleDrawer projectId={openId} onClose={() => setOpenId(null)} />}
-      {showSettings && <PaymentSettings onClose={() => setShowSettings(false)} />}
+      {admin && showSettings && <PaymentSettings onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
@@ -116,6 +120,7 @@ function ScheduleDrawer({ projectId, onClose }: { projectId: string; onClose: ()
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const loaded = useRef(false);
+  const admin = isAdmin(useAuthStore((s) => s.user));
 
   useEffect(() => {
     if (!data || loaded.current) return;
@@ -179,6 +184,7 @@ function ScheduleDrawer({ projectId, onClose }: { projectId: string; onClose: ()
               </section>
             )}
 
+            {admin && (
             <section className="space-y-3">
               <h3 className="text-xs font-semibold text-slate-300">Schedule</h3>
               <div className="grid grid-cols-2 gap-3">
@@ -226,8 +232,25 @@ function ScheduleDrawer({ projectId, onClose }: { projectId: string; onClose: ()
               </button>
               <p className="text-[11px] text-slate-500">Lines with a payment can&apos;t be removed or change amount. Customers get reminders 3 days before a due date and when it&apos;s overdue.</p>
             </section>
+            )}
+            {!admin && (
+              <section className="space-y-2">
+                <h3 className="text-xs font-semibold text-slate-300">Schedule</h3>
+                <ul className="divide-y divide-slate-800 rounded-lg border border-slate-800">
+                  {milestones.map((m) => (
+                    <li key={m._id} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+                      <span className="text-slate-200">{m.title}</span>
+                      <span className="text-slate-400">
+                        {inr(m.amountPaise)} · due {fmt(m.dueDate)} · <span className="capitalize">{m.status}</span>
+                      </span>
+                    </li>
+                  ))}
+                  {milestones.length === 0 && <li className="px-3 py-2 text-xs text-slate-500">No schedule yet.</li>}
+                </ul>
+              </section>
+            )}
 
-            {milestones.filter((m) => m.status === "upcoming").length > 0 && (
+            {admin && milestones.filter((m) => m.status === "upcoming").length > 0 && (
               <section className="space-y-2">
                 <h3 className="text-xs font-semibold text-slate-300">Record a payment received directly</h3>
                 {milestones.filter((m) => m.status === "upcoming").map((m) => (
@@ -244,6 +267,10 @@ function ScheduleDrawer({ projectId, onClose }: { projectId: string; onClose: ()
 
 function MilestoneActions({ projectId, m, onDone }: { projectId: string; m: AdminMilestone; onDone: (d: Awaited<ReturnType<typeof paymentsApi.adminGet>>) => void }) {
   const [mode, setMode] = useState<"idle" | "confirm" | "reject">("idle");
+  const me = useAuthStore((s) => s.user);
+  const admin = isAdmin(me);
+  // "payments.confirm" holders confirm or reject what a customer reported; admins do everything
+  const canConfirm = can(me, "payments.confirm");
   const [method, setMethod] = useState<PayMethod>(m.claim?.method ?? "bank_transfer");
   const [reference, setReference] = useState(m.claim?.reference ?? "");
   const [amount, setAmount] = useState(String((m.claim?.amountPaise ?? m.amountPaise) / 100));
@@ -316,14 +343,14 @@ function MilestoneActions({ projectId, m, onDone }: { projectId: string; m: Admi
       )}
       {mode === "idle" && (
         <div className="flex flex-wrap gap-2">
-          {(m.status === "verifying" || m.status === "upcoming") && (
+          {canConfirm && (m.status === "verifying" || (admin && m.status === "upcoming")) && (
             <button type="button" onClick={() => setMode("confirm")} className="px-3 py-1.5 rounded-lg bg-emerald-600/80 text-white">{m.status === "verifying" ? "Confirm" : "Record payment"}</button>
           )}
-          {m.status === "verifying" && <button type="button" onClick={() => setMode("reject")} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200">Can&apos;t find it</button>}
-          {(m.status === "verifying" || m.status === "upcoming") && (
+          {canConfirm && m.status === "verifying" && <button type="button" onClick={() => setMode("reject")} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200">Can&apos;t find it</button>}
+          {admin && (m.status === "verifying" || m.status === "upcoming") && (
             <button type="button" disabled={busy} onClick={() => confirm(`Waive "${m.title}"? The customer won't need to pay it.`) && run(() => paymentsApi.waive(projectId, m._id))} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-400">Waive</button>
           )}
-          {m.status === "paid" && (
+          {admin && m.status === "paid" && (
             <>
               <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) run(() => paymentsApi.uploadInvoice(projectId, m._id, f)); }} />
               <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200">

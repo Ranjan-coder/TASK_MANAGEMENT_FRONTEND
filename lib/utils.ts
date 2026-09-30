@@ -46,11 +46,13 @@ export function homeRouteFor(user?: { role?: string; mustChangePassword?: boolea
   if (user.mustChangePassword) return "/settings?section=security";
   if (user.role === "customer") return "/home";
   if (user.role === "marketing") return "/admin/campaigns";
+  if (user.role === "leadership") return "/admin/overview";
   return "/dashboard";
 }
 
-// Staff-app areas that customers and marketing accounts cannot use
+// Staff-app areas that customers, marketing and leadership accounts cannot use
 export const RESTRICTED_FOR_LIMITED_ROLES = ["/dashboard", "/tasks", "/users", "/audit-logs"];
+export const LIMITED_ROLES = ["customer", "marketing", "leadership"];
 
 // Customer-portal-only areas
 export const CUSTOMER_ONLY_ROUTES = ["/home"];
@@ -60,7 +62,7 @@ export const CONTENT_MANAGER_ROUTES = ["/admin"];
 export const CONTENT_MANAGER_ROLES = ["superadmin", "admin", "marketing"];
 
 // Project set-up: admins only
-export const ADMIN_ONLY_ROUTES = ["/admin/projects", "/admin/reply-times", "/admin/reports", "/admin/moderation", "/admin/overview", "/admin/performance", "/admin/customers", "/admin/privacy", "/admin/payments", "/admin/referrals"];
+export const ADMIN_ONLY_ROUTES = ["/admin/organisation", "/admin/projects", "/admin/reply-times", "/admin/reports", "/admin/moderation", "/admin/overview", "/admin/performance", "/admin/customers", "/admin/privacy", "/admin/payments", "/admin/referrals"];
 
 /**
  * Right-sized image from Cloudinary: modern format (WebP/AVIF), automatic quality and

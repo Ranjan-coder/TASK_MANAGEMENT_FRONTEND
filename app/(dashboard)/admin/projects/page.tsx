@@ -53,6 +53,9 @@ export default function ProjectsAdminPage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<ProjectStatus | "all">("active");
   const [editing, setEditing] = useState<{ project: AdminProject | null } | null>(null);
+  // Leadership and "view projects" holders see the list; only admins set projects up
+  const me = useAuthStore((s) => s.user);
+  const admin = me?.role === "superadmin" || me?.role === "admin";
   const { data: projects, isLoading } = useQuery({
     queryKey: ["admin-projects", filter],
     queryFn: () => projectsApi.list(filter === "all" ? undefined : filter)
@@ -65,9 +68,11 @@ export default function ProjectsAdminPage() {
           <h1 className="text-2xl font-bold text-white">Projects</h1>
           <p className="text-sm text-slate-400">Each project is a private chat between the customer and their design team.</p>
         </div>
-        <button onClick={() => setEditing({ project: null })} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold">
-          <Plus className="h-4 w-4" /> New project
-        </button>
+        {admin && (
+          <button onClick={() => setEditing({ project: null })} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold">
+            <Plus className="h-4 w-4" /> New project
+          </button>
+        )}
       </div>
 
       <div className="flex gap-2" role="group" aria-label="Filter projects">
@@ -116,9 +121,11 @@ export default function ProjectsAdminPage() {
                 <dt className="text-slate-500">People</dt>
                 <dd className="text-slate-200">{p.members.length}</dd>
               </dl>
-              <button onClick={() => setEditing({ project: p })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs hover:border-slate-500">
-                <Pencil className="h-3.5 w-3.5" /> Edit team &amp; status
-              </button>
+              {admin && (
+                <button onClick={() => setEditing({ project: p })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs hover:border-slate-500">
+                  <Pencil className="h-3.5 w-3.5" /> Edit team &amp; status
+                </button>
+              )}
             </li>
           ))}
         </ul>

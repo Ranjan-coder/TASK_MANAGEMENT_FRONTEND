@@ -18,9 +18,10 @@ const PROTECTED_PREFIXES = [
   "/chat",
   "/home",
   "/admin",
-  "/receipts"
+  "/receipts",
+  "/org"
 ];
-const STAFF_ONLY_PREFIXES = ["/dashboard", "/tasks", "/users", "/audit-logs", "/admin"];
+const STAFF_ONLY_PREFIXES = ["/dashboard", "/tasks", "/users", "/audit-logs", "/admin", "/org"];
 const CUSTOMER_ONLY_PREFIXES = ["/home"];
 const AUTH_PREFIXES = ["/login", "/signup", "/forgot-password", "/reset-password"];
 
@@ -31,7 +32,7 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const signedIn = Boolean(request.cookies.get("accessToken")?.value || request.cookies.get("refreshToken")?.value);
   const role = request.cookies.get("role")?.value;
-  const home = role === "customer" ? "/home" : "/dashboard";
+  const home = role === "customer" ? "/home" : role === "leadership" ? "/admin/overview" : "/dashboard";
 
   if (pathname === "/") {
     return NextResponse.redirect(new URL(signedIn ? home : "/login", request.url));
@@ -72,6 +73,7 @@ export const config = {
     "/home/:path*",
     "/admin/:path*",
     "/receipts/:path*",
+    "/org/:path*",
     "/login",
     "/signup",
     "/forgot-password",

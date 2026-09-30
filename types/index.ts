@@ -1,7 +1,10 @@
-export type Role = "superadmin" | "admin" | "marketing" | "user" | "customer";
+export type Role = "superadmin" | "admin" | "marketing" | "user" | "leadership" | "customer";
 
 // Roles that use the staff app (everything except customers)
-export const STAFF_ROLES: Role[] = ["superadmin", "admin", "marketing", "user"];
+export const STAFF_ROLES: Role[] = ["superadmin", "admin", "marketing", "user", "leadership"];
+
+// Add-on permissions (backend config/permissions.js); admins hold all of them
+export type Permission = "leads.view" | "leads.manage" | "payments.view" | "payments.confirm" | "performance.view" | "projects.view";
 export type TaskStatus = "todo" | "in_progress" | "in_review" | "completed" | "blocked" | "cancelled";
 export type TaskPriority = "low" | "medium" | "high" | "critical";
 
@@ -13,6 +16,12 @@ export interface User {
   avatarUrl?: string;
   department?: string;
   designation?: string;
+  departmentId?: string | null;
+  designationId?: string | null;
+  // Populated ({ _id, name, … }) on the single-user endpoint, an id elsewhere
+  reportsTo?: string | { _id: string; name: string; avatarUrl?: string; designation?: string } | null;
+  permissions?: Permission[];
+  effectivePermissions?: Permission[];
   status: "active" | "inactive" | "suspended";
   isTwoFactorEnabled: boolean;
   mustChangePassword?: boolean;

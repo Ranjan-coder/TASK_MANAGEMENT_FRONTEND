@@ -6,6 +6,8 @@ export interface UserFilters {
   role?: string;
   status?: string;
   department?: string;
+  departmentId?: string;
+  designationId?: string;
   search?: string;
 }
 
@@ -14,15 +16,17 @@ export interface CreateUserPayload {
   name: string;
   email: string;
   password: string;
-  role?: "superadmin" | "admin" | "marketing" | "user" | "customer";
-  department?: string;
-  designation?: string;
+  role?: "superadmin" | "admin" | "marketing" | "user" | "leadership" | "customer";
+  departmentId?: string | null;
+  designationId?: string | null;
+  reportsTo?: string | null;
 }
 
 export interface UpdateUserPayload {
   name?: string;
-  department?: string;
-  designation?: string;
+  departmentId?: string | null;
+  designationId?: string | null;
+  reportsTo?: string | null;
   avatarUrl?: string;
   availability?: { status: "available" | "on_leave"; until?: string | null };
   notificationPrefs?: { whatsapp: boolean; sms: boolean };

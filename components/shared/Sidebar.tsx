@@ -27,9 +27,13 @@ import {
   Lock,
   IndianRupee,
   Gift,
+  Network,
+  Building2,
   X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { can, ROLE_LABELS } from "@/lib/permissions";
+import type { Permission } from "@/types";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -43,19 +47,19 @@ export function Sidebar() {
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["superadmin", "admin", "user"] },
     { label: "Tasks", href: "/tasks", icon: CheckSquare, roles: ["superadmin", "admin", "user"] },
     { label: "Chat", href: "/chat", icon: MessageSquare, badge: totalUnread },
-    { label: "Overview", href: "/admin/overview", icon: Gauge, roles: ["superadmin", "admin"] },
+    { label: "Overview", href: "/admin/overview", icon: Gauge, roles: ["superadmin", "admin"], perms: ["performance.view"] },
     { label: "Customers", href: "/admin/customers", icon: Contact, roles: ["superadmin", "admin"] },
-    { label: "Projects", href: "/admin/projects", icon: FolderKanban, roles: ["superadmin", "admin"] },
+    { label: "Projects", href: "/admin/projects", icon: FolderKanban, roles: ["superadmin", "admin"], perms: ["projects.view"] },
     { label: "Reports", href: "/admin/reports", icon: Flag, roles: ["superadmin", "admin"] },
     { label: "Moderation", href: "/admin/moderation", icon: ShieldHalf, roles: ["superadmin", "admin"] },
-    { label: "Payments", href: "/admin/payments", icon: IndianRupee, roles: ["superadmin", "admin"] },
+    { label: "Payments", href: "/admin/payments", icon: IndianRupee, roles: ["superadmin", "admin"], perms: ["payments.view", "payments.confirm"] },
     { label: "Referrals", href: "/admin/referrals", icon: Gift, roles: ["superadmin", "admin"] },
-    { label: "Performance", href: "/admin/performance", icon: TrendingUp, roles: ["superadmin", "admin"] },
+    { label: "Performance", href: "/admin/performance", icon: TrendingUp, roles: ["superadmin", "admin"], perms: ["performance.view"] },
     { label: "Privacy", href: "/admin/privacy", icon: Lock, roles: ["superadmin", "admin"] },
     { label: "Reply times", href: "/admin/reply-times", icon: Timer, roles: ["superadmin", "admin"] },
     { label: "Campaigns", href: "/admin/campaigns", icon: Megaphone, roles: ["superadmin", "admin", "marketing"] },
     { label: "Catalog", href: "/admin/catalog", icon: Package, roles: ["superadmin", "admin", "marketing"] },
-    { label: "Leads", href: "/admin/leads", icon: PhoneCall, roles: ["superadmin", "admin", "marketing"] },
+    { label: "Leads", href: "/admin/leads", icon: PhoneCall, roles: ["superadmin", "admin", "marketing"], perms: ["leads.view", "leads.manage"] },
     { label: "Testimonials", href: "/admin/testimonials", icon: Quote, roles: ["superadmin", "admin", "marketing"] },
     {
       label: "Users",
@@ -63,6 +67,8 @@ export function Sidebar() {
       icon: Users,
       roles: ["admin", "superadmin"]
     },
+    { label: "Organisation", href: "/admin/organisation", icon: Building2, roles: ["admin", "superadmin"] },
+    { label: "Org chart", href: "/org", icon: Network, roles: ["superadmin", "admin", "marketing", "user", "leadership"] },
     { label: "Notifications", href: "/notifications", icon: Bell },
     {
       label: "Audit Logs",
@@ -119,7 +125,7 @@ export function Sidebar() {
         {/* Nav Links */}
         <div className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
           {navItems
-            .filter((item) => !item.roles || (user && item.roles.includes(user.role)))
+            .filter((item) => !item.roles || (user && item.roles.includes(user.role)) || ("perms" in item && can(user, ...((item as { perms?: Permission[] }).perms ?? []))))
             .map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -168,7 +174,7 @@ export function Sidebar() {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-slate-200 group-hover:text-violet-300 transition truncate">{user?.name || "User"}</p>
               <p className="text-xs text-slate-400 capitalize truncate">
-                {user?.role || "Staff"} {user?.department ? `· ${user.department}` : ""}
+                {user?.designation || ROLE_LABELS[user?.role ?? ""] || "Staff"} {user?.department ? `· ${user.department}` : ""}
               </p>
             </div>
           </Link>
