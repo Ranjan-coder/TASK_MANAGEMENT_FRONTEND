@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Users as UsersIcon, X, Film, Image as ImageIcon, Tag, Eye, MousePointerClick, PhoneCall } from "lucide-react";
 import { toast } from "sonner";
+import { hasModule } from "@/lib/modules";
+import { useAuthStore } from "@/store/authStore";
 import {
   adminContentApi,
   ctaDefaultLabel,
@@ -155,7 +157,7 @@ export default function CampaignsAdminPage() {
                   <button onClick={() => setEditing({ id: c._id, input: toInput(c) })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs hover:border-slate-500">
                     <Pencil className="h-3.5 w-3.5" /> Edit
                   </button>
-                  {c.cta.type === "consultation" && (
+                  {c.cta.type === "consultation" && hasModule(useAuthStore.getState().user, "leads") && (
                     <button onClick={() => setLeadsFor(c)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs hover:border-slate-500">
                       <UsersIcon className="h-3.5 w-3.5" /> Requests
                     </button>
@@ -319,7 +321,7 @@ function CampaignEditor({ id, initial, onClose, onSaved }: { id: string | null; 
               {needsValue && (
                 <div>
                   <label htmlFor="c-cta-value" className={labelClass}>{form.cta.type === "link" ? "Link (https://)" : "Phone number"}</label>
-                  <input id="c-cta-value" required value={form.cta.value} onChange={(e) => set("cta", { ...form.cta, value: e.target.value })} className={inputClass} placeholder={form.cta.type === "link" ? "https://bonito.in/offers" : "98765 43210"} />
+                  <input id="c-cta-value" required value={form.cta.value} onChange={(e) => set("cta", { ...form.cta, value: e.target.value })} className={inputClass} placeholder={form.cta.type === "link" ? "https://example.com/offers" : "98765 43210"} />
                 </div>
               )}
             </div>

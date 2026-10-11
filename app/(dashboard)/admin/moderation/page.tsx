@@ -29,7 +29,7 @@ export default function ModerationPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">Moderation</h1>
           <p className="text-sm text-slate-400">
-            Abuse alerts from project chats. Words are checked on people&apos;s devices; Bonito only receives counts, never the messages.
+            Abuse alerts from project chats. Words are checked on people&apos;s devices; the server only receives counts, never the messages.
           </p>
         </div>
       </div>

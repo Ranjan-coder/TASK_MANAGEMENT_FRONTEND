@@ -129,3 +129,22 @@ export const editMessage = (
 
 export const deleteMessage = (messageId: string, scope: "me" | "everyone" = "everyone") =>
   chatAxios.delete(`/messages/${messageId}`, { data: { scope } }).then((r) => r.data);
+
+// ── People (staff directory) ─────────────────────────────────────────────────
+
+/** A colleague who can be added to a chat (no email or phone: pickers don't need them). */
+export interface DirectoryPerson {
+  _id: string;
+  name: string;
+  avatarUrl: string;
+  designation: string;
+  role: string;
+  publicKey: string | null;
+  keyVersion: number;
+}
+
+/** Active staff of my organisation who have chat, in name order; `next` pages on. */
+export const fetchChatPeople = (search: string, cursor?: string) =>
+  chatAxios
+    .get<ApiResponse<{ people: DirectoryPerson[]; next: string | null }>>("/people", { params: { search: search || undefined, cursor } })
+    .then((r) => r.data.data);

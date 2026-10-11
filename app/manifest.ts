@@ -1,10 +1,11 @@
 import type { MetadataRoute } from "next";
 
-/** Makes Bonito installable on phones and desktops (R7). */
+/** Makes the app installable on phones and desktops (R7). Name: NEXT_PUBLIC_APP_NAME. */
 export default function manifest(): MetadataRoute.Manifest {
+  const name = process.env.NEXT_PUBLIC_APP_NAME || "Serenx";
   return {
-    name: "Bonito Interiors",
-    short_name: "Bonito",
+    name,
+    short_name: name.slice(0, 12),
     description: "Your interior design projects, offers and designer chat.",
     start_url: "/",
     scope: "/",

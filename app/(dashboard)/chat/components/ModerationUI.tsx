@@ -45,7 +45,7 @@ export function useOffensiveConfirm() {
         </h2>
         <p id="offensive-body" className="mt-2 text-sm text-slate-300">
           {pending.severity === "threat"
-            ? "This message may read as a threat. If you send it, Bonito management will be alerted straight away."
+            ? "This message may read as a threat. If you send it, the management team will be alerted straight away."
             : "This message may come across as offensive."}{" "}
           Words like this are counted, and the chat is flagged for review if it keeps happening.
         </p>
@@ -113,7 +113,7 @@ export function ModerationWarningPopup({ conversationId, warningAt, active }: { 
         <AlertTriangle className="h-10 w-10 text-amber-300 mx-auto" />
         <h2 id="modwarn-title" className="mt-3 text-base font-semibold text-white">Please keep it respectful</h2>
         <p className="mt-2 text-sm text-slate-300">
-          This conversation is moving towards abusive language. This chat has been flagged for review by Bonito management.
+          This conversation is moving towards abusive language. This chat has been flagged for review by the management team.
         </p>
         <p className="mt-2 text-xs text-slate-500">If something upset you, you can report it with the ⚑ button at the top of the chat.</p>
         <button type="button" autoFocus onClick={close} className="mt-5 px-5 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-500">

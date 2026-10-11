@@ -17,20 +17,45 @@ export interface LoginBody {
   authKey: string;
   password?: string; // sent once, only for accounts created before this scheme
   trustDevice?: boolean;
+  organisation?: string; // organisation code, for people with accounts in several organisations
+}
+
+// The last organisation code used on this browser (not secret: it only picks
+// which of the person's accounts to sign in to)
+const ORG_KEY = "bonito.orgCode";
+export const ORG_CODE_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
+
+export function rememberedOrgCode(): string {
+  try {
+    return localStorage.getItem(ORG_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function rememberOrgCode(code: string | undefined): void {
+  try {
+    if (code) localStorage.setItem(ORG_KEY, code);
+    else localStorage.removeItem(ORG_KEY);
+  } catch {
+    /* storage unavailable (private mode): nothing to remember */
+  }
 }
 
 /** Fetches the account's KDF settings and derives the login keys. */
 export async function prepareLogin(
   identifier: string,
   password: string,
-  trustDevice = true
+  trustDevice = true,
+  organisation?: string
 ): Promise<{ body: LoginBody; wrapKey: CryptoKey }> {
-  const res = await apiClient.post<{ data: { kdf: KdfParams; legacy: boolean } }>("/auth/prelogin", { identifier });
+  const org = organisation ? { organisation } : {};
+  const res = await apiClient.post<{ data: { kdf: KdfParams; legacy: boolean } }>("/auth/prelogin", { identifier, ...org });
   const { kdf, legacy } = res.data.data;
   const { authKey, wrapKey } = await deriveKeysFromPassword(password, kdf);
   // Decide where chat keys may be stored before anything is unlocked
   setKeyStorageTrusted(trustDevice);
-  return { body: { identifier, authKey, trustDevice, ...(legacy ? { password } : {}) }, wrapKey };
+  return { body: { identifier, authKey, trustDevice, ...org, ...(legacy ? { password } : {}) }, wrapKey };
 }
 
 /** Keys for a brand-new password (sign-up, reset, change, admin-created account). */

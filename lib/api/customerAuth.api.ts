@@ -11,15 +11,10 @@ export interface PhoneVerificationStep {
   otpMessage?: string;
 }
 
-export interface CustomerRegisterPayload {
-  name: string;
-  email: string;
-  phone: string;
-  authKey: string;
-  kdfSalt: string;
-  acceptTerms: true;
-  projectAlerts?: boolean;
-  referralCode?: string;
+export interface ResetChoice {
+  chooseOrganisation: true;
+  organisations: { slug: string; name: string }[];
+  resetToken: string;
 }
 
 export interface VerifiedSession {
@@ -29,9 +24,6 @@ export interface VerifiedSession {
 }
 
 export const customerAuthApi = {
-  register: (data: CustomerRegisterPayload) =>
-    apiClient.post<{ data: PhoneVerificationStep }>("/customer/auth/register", data),
-
   sendOtp: (data: { verificationToken: string; phone?: string }) =>
     apiClient.post<{ data: { phoneMasked: string; resendAfterSeconds: number } }>("/customer/auth/otp/send", data),
 
@@ -41,8 +33,11 @@ export const customerAuthApi = {
   requestPasswordResetOtp: (data: { phone: string }) =>
     apiClient.post<{ data: { resendAfterSeconds: number }; message: string }>("/customer/auth/password/otp", data),
 
-  resetPasswordWithOtp: (data: { phone: string; code: string; authKey: string; kdfSalt: string }) =>
-    apiClient.post("/customer/auth/password/reset", data)
+  // Several organisations on one phone: the first call answers with chooseOrganisation,
+  // and the second sends resetToken + the chosen organisation code instead of the code
+  resetPasswordWithOtp: (
+    data: { authKey: string; kdfSalt: string } & ({ phone: string; code: string } | { resetToken: string; organisation: string })
+  ) => apiClient.post<{ data: ResetChoice | null; message: string }>("/customer/auth/password/reset", data)
 };
 
 /** First human-readable error message from an API error response. */

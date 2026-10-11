@@ -10,9 +10,12 @@ import {
   CONTENT_MANAGER_ROUTES,
   CONTENT_MANAGER_ROLES,
   ADMIN_ONLY_ROUTES,
-  LIMITED_ROLES
+  LIMITED_ROLES,
+  PLATFORM_ROUTES,
+  PLATFORM_OWNER_ROUTES
 } from "@/lib/utils";
 import { can, ROUTE_PERMISSIONS } from "@/lib/permissions";
+import { canOpenPage } from "@/lib/modules";
 import type { User } from "@/types";
 
 /** Admin screens opened by an add-on permission (or leadership) for this person. */
@@ -37,6 +40,20 @@ export function AccountGate() {
     }
 
     const within = (routes: string[]) => routes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+    // Product owner: their console and account settings only; nobody else sees the console
+    if (user.role === "platform_owner") {
+      if (!within(PLATFORM_OWNER_ROUTES)) router.replace(homeRouteFor(user));
+      return;
+    }
+    if (within(PLATFORM_ROUTES)) {
+      router.replace(homeRouteFor(user));
+      return;
+    }
+    // Screens of a module the organisation doesn't have
+    if (!canOpenPage(user, pathname)) {
+      router.replace(homeRouteFor(user));
+      return;
+    }
     const limited = LIMITED_ROLES.includes(user.role);
     const viaPermission = openedByPermission(user, within);
     if (limited && within(RESTRICTED_FOR_LIMITED_ROLES)) {

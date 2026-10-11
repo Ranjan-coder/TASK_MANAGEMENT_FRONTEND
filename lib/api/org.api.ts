@@ -9,6 +9,8 @@ export interface Department {
   sortOrder: number;
   head: { _id: string; name?: string; avatarUrl?: string; designation?: string } | null;
   userCount?: number;
+  standard?: boolean; // from the product owner's standard list
+  customised?: string[]; // fields this organisation changed (kept when the standard changes)
 }
 
 export interface Designation {
@@ -21,6 +23,8 @@ export interface Designation {
   isActive: boolean;
   sortOrder: number;
   userCount?: number;
+  standard?: boolean;
+  customised?: string[];
 }
 
 export interface OrgNode {
@@ -41,7 +45,7 @@ export interface TeamMember extends Omit<OrgNode, "reports"> {
 }
 
 export interface PermissionCatalog {
-  permissions: { key: Permission; label: string }[];
+  permissions: { key: Permission; label: string; module?: string }[];
   implied: Partial<Record<Role, Permission[]>>;
   grantableRoles: Role[];
 }
@@ -65,6 +69,30 @@ const listParams = (opts: { includeInactive?: boolean; counts?: boolean } = {}) 
   ...(opts.counts && { counts: "1" })
 });
 
+/** One of the organisation's modules, with seats (superadmin view). */
+export interface OrgModuleRow {
+  key: string;
+  label: string;
+  description: string;
+  core: boolean;
+  requiresAll: string[];
+  neededBy: string[];
+  seatLimit: number | null;
+  seatsUsed: number | null;
+  defaultOn?: boolean; // everyone has it (no per-person grants, no seats)
+  orgWide?: boolean; // a setting of the whole organisation (e.g. branding): everyone has it, no seats
+  customerOptIn?: boolean; // a superadmin may open it to customers
+  customersEnabled?: boolean;
+}
+
+export interface UserModules {
+  all: boolean; // holds every module (by role default or by choice)
+  default: boolean; // following the role's default
+  keys: string[];
+  effective: string[];
+  version: number;
+}
+
 export const orgApi = {
   departments: (opts?: { includeInactive?: boolean; counts?: boolean }) =>
     data<Department[]>(apiClient.get("/org/departments", { params: listParams(opts) })),
@@ -78,7 +106,17 @@ export const orgApi = {
   create: <T>(kind: Kind, body: Record<string, unknown>) => data<T>(apiClient.post(`/org/${kind}`, body)),
   update: <T>(kind: Kind, id: string, body: Record<string, unknown>) => data<T>(apiClient.patch(`/org/${kind}/${id}`, body)),
   remove: (kind: Kind, id: string) => apiClient.delete(`/org/${kind}/${id}`),
+  /** Take the product owner's standard version again (drops this organisation's own changes). */
+  reset: (kind: Kind, id: string) => apiClient.post(`/org/${kind}/${id}/reset`),
   merge: (kind: Kind, id: string, into: string) => data<{ usersMoved: number }>(apiClient.post(`/org/${kind}/${id}/merge`, { into })),
   reorder: (kind: Kind, ids: string[]) => apiClient.put(`/org/${kind}/order`, { ids }),
-  setUserPermissions: (userId: string, permissions: Permission[]) => apiClient.patch(`/users/${userId}/permissions`, { permissions })
+  setUserPermissions: (userId: string, permissions: Permission[]) => apiClient.patch(`/users/${userId}/permissions`, { permissions }),
+
+  // ── Modules (superadmin; module-access-plan.md Phase 4) ──
+  modules: () => data<OrgModuleRow[]>(apiClient.get("/org/modules")),
+  userModules: (userId: string) => data<UserModules>(apiClient.get(`/users/${userId}/modules`)),
+  setUserModules: (userId: string, body: { all: boolean | null; keys: string[] }) => apiClient.patch(`/users/${userId}/modules`, body),
+  setModuleCustomers: (key: string, enabled: boolean) => apiClient.patch(`/org/modules/${key}/customers`, { enabled }),
+  setModuleMembers: (key: string, body: { add?: string[]; remove?: string[] }) =>
+    data<{ changed: number; skipped: number }>(apiClient.post(`/org/modules/${key}/members`, body))
 };

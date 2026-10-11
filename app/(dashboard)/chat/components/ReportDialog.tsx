@@ -8,6 +8,8 @@ import { apiErrorMessage } from "@/lib/api/customerAuth.api";
 import { useChatStore } from "@/store/chatStore";
 import type { Conversation, Message } from "@/types/chat";
 import { cn } from "@/lib/utils";
+import { orgNameNow } from "@/lib/brand";
+
 
 const MAX_MESSAGES = 20;
 const MAX_SHOTS = 5;
@@ -44,7 +46,7 @@ export function ReportDialog({ conversation, myUserId, isCustomer, onClose }: Pr
           ? "Project manager"
           : customerIds.has(id)
             ? "Customer"
-            : "Bonito team";
+            : `${orgNameNow("Our")} team`;
 
   const people = conversation.members
     .map((m) => m.user)
@@ -206,7 +208,7 @@ export function ReportDialog({ conversation, myUserId, isCustomer, onClose }: Pr
                   <div>
                     <p className="text-xs text-slate-300">Messages to include (optional)</p>
                     <p className="text-[11px] text-slate-500 mb-1.5 flex items-center gap-1">
-                      <ShieldCheck className="h-3 w-3 text-emerald-400" /> Only ticked messages are shared with Bonito admins, marked as verified.
+                      <ShieldCheck className="h-3 w-3 text-emerald-400" /> Only ticked messages are shared with the admins, marked as verified.
                     </p>
                     {selectable.length === 0 ? (
                       <p className="text-[11px] text-slate-500">No messages that can be included. Messages sent before this update can't be verified — add a screenshot instead.</p>

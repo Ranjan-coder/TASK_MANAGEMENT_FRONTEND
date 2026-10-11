@@ -4,6 +4,8 @@ import Link from "next/link";
 import { Check, MessageSquare, CalendarClock } from "lucide-react";
 import { PROJECT_STAGES, type MyProject } from "@/lib/api/projectExtras.api";
 import { cn } from "@/lib/utils";
+import { orgNameNow } from "@/lib/brand";
+
 
 const fmt = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
@@ -20,7 +22,7 @@ export function ProjectTimeline({ project }: { project: MyProject }) {
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-white truncate">{project.name}</h3>
           <p className="text-xs text-slate-400">
-            {project.leadDesigner ? `Designer: ${project.leadDesigner.name}` : "Your Bonito team"}
+            {project.leadDesigner ? `Designer: ${project.leadDesigner.name}` : `Your ${orgNameNow("design")} team`}
             {project.status === "on_hold" && <span className="ml-2 text-amber-300">· On hold</span>}
           </p>
         </div>

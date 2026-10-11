@@ -175,7 +175,7 @@ export default function ReplyTimesPage() {
           <p className="text-xs text-slate-400 mt-1">Get a notification and an email when a customer waits past the escalation timer. The project manager is always included too.</p>
           <div className="mt-3 flex items-center gap-2 text-xs">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-200">
-              <Lock className="h-3 w-3 text-slate-400" /> {defaultContact?.email || "admin@bonito.in"}
+              <Lock className="h-3 w-3 text-slate-400" /> {defaultContact?.email || "the monitoring account"}
             </span>
             <span className="text-slate-500">always included</span>
             {defaultContact?.missing && <span className="text-amber-300">— this account doesn’t exist yet</span>}

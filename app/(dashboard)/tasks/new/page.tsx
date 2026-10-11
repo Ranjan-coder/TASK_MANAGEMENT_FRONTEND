@@ -50,7 +50,7 @@ export default function NewTaskPage() {
 
   const { data: usersData, isLoading: isUsersLoading } = useQuery({
     queryKey: ["users-list"],
-    queryFn: () => usersApi.getUsers({ limit: 100 }).then((r) => r.data.data)
+    queryFn: () => usersApi.getUsers({ role: "staff", status: "active", limit: 100 }).then((r) => r.data.data)
   });
   const users: { _id: string; name: string; email: string; department?: string; designation?: string }[] =
     usersData ?? [];

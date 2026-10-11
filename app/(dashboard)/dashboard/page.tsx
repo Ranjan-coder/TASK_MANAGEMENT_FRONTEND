@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useAuthStore } from "../../../store/authStore";
+import { hasModule } from "@/lib/modules";
+import { TodayWidget } from "@/components/planner/TodayWidget";
 import { dashboardApi } from "../../../lib/api/dashboard.api";
 import {
   Sparkles,
@@ -229,6 +231,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Planner: today's meetings, reminders and overdue todos (only if the module is on) */}
+      {hasModule(user, "planner") && <TodayWidget />}
 
       {/* 😄 Daily Spark & Work Humor Card */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900/95 via-violet-950/20 to-slate-900/95 border border-violet-500/30 p-5 shadow-xl shadow-black/30 group">

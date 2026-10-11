@@ -11,6 +11,7 @@ import { CampaignCarousel } from "@/components/customer/CampaignCarousel";
 import { CatalogCard } from "@/components/customer/CatalogCard";
 import { ConsultationDialog } from "@/components/customer/ConsultationDialog";
 import { cn, sizedImage } from "@/lib/utils";
+import { hasModule } from "@/lib/modules";
 import { extrasApi } from "@/lib/api/projectExtras.api";
 import { ProjectTimeline } from "@/components/customer/ProjectTimeline";
 import { AlertsPrompt } from "@/components/customer/AlertsPrompt";
@@ -18,6 +19,8 @@ import { paymentsApi, inr } from "@/lib/api/payments.api";
 import { IndianRupee, Gift } from "lucide-react";
 import { BeforeAfter } from "@/components/customer/BeforeAfter";
 import { Star, Quote, MapPin } from "lucide-react";
+import { OrgName } from "@/lib/brand";
+
 
 const greeting = () => {
   const hour = new Date().getHours();
@@ -40,12 +43,14 @@ export default function CustomerHomePage() {
   const [category, setCategory] = useState<string | null>(null);
   const [consultFor, setConsultFor] = useState<PublicCampaign | null>(null);
 
-  const campaignsQ = useQuery({ queryKey: ["live-campaigns"], queryFn: contentApi.liveCampaigns, staleTime: 60_000 });
-  const catalogQ = useQuery({ queryKey: ["catalog"], queryFn: () => contentApi.catalog(), staleTime: 5 * 60_000 });
-  const convsQ = useQuery({ queryKey: ["customer-conversations"], queryFn: fetchConversations });
-  const timelinesQ = useQuery({ queryKey: ["my-projects"], queryFn: extrasApi.myProjects });
-  const testimonialsQ = useQuery({ queryKey: ["testimonials"], queryFn: extrasApi.testimonials, staleTime: 5 * 60_000 });
-  const paymentsQ = useQuery({ queryKey: ["my-payments"], queryFn: paymentsApi.mine, staleTime: 60_000 });
+  // Each section loads only if the organisation has its module (the API refuses the rest)
+  const marketing = hasModule(user, "marketing");
+  const campaignsQ = useQuery({ queryKey: ["live-campaigns"], queryFn: contentApi.liveCampaigns, staleTime: 60_000, enabled: marketing });
+  const catalogQ = useQuery({ queryKey: ["catalog"], queryFn: () => contentApi.catalog(), staleTime: 5 * 60_000, enabled: marketing });
+  const convsQ = useQuery({ queryKey: ["customer-conversations"], queryFn: fetchConversations, enabled: hasModule(user, "chat") });
+  const timelinesQ = useQuery({ queryKey: ["my-projects"], queryFn: extrasApi.myProjects, enabled: hasModule(user, "projects") });
+  const testimonialsQ = useQuery({ queryKey: ["testimonials"], queryFn: extrasApi.testimonials, staleTime: 5 * 60_000, enabled: marketing });
+  const paymentsQ = useQuery({ queryKey: ["my-payments"], queryFn: paymentsApi.mine, staleTime: 60_000, enabled: hasModule(user, "payments") });
   const nextPayment = (paymentsQ.data?.projects ?? [])
     .flatMap((p) => p.milestones.filter((m) => m.status === "upcoming" || m.status === "verifying").map((m) => ({ ...m, projectName: p.projectName })))
     .sort((a, b) => (a.dueDate ? +new Date(a.dueDate) : Infinity) - (b.dueDate ? +new Date(b.dueDate) : Infinity))[0];
@@ -67,7 +72,7 @@ export default function CustomerHomePage() {
         <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
           {greeting()}, {firstName}
         </h1>
-        <p className="text-slate-400">Ideas, offers and your projects with Bonito.</p>
+        <p className="text-slate-400">Ideas, offers and your projects with <OrgName fallback="your designers" />.</p>
         {user?.phoneVerified && (
           <p className="inline-flex items-center gap-1.5 text-xs text-emerald-400">
             <ShieldCheck className="h-3.5 w-3.5" /> Mobile number verified
@@ -104,7 +109,7 @@ export default function CustomerHomePage() {
                   <h3 className="font-semibold text-white">{o.title}</h3>
                   {o.description && <p className="text-sm text-slate-300 line-clamp-3 whitespace-pre-line">{o.description}</p>}
                   {o.offer?.terms && <p className="text-[11px] text-slate-500">{o.offer.terms}</p>}
-                  {o.cta.type === "consultation" && (
+                  {o.cta.type === "consultation" && hasModule(user, "leads") && (
                     <button
                       type="button"
                       onClick={() => {
@@ -178,7 +183,7 @@ export default function CustomerHomePage() {
             <div className="space-y-1">
               <p className="font-semibold text-white">No project chat yet</p>
               <p className="text-sm text-slate-400">
-                Once your consultation is booked, Bonito will add you to a project chat with your designer. You&apos;ll get a notification when it&apos;s ready.
+                Once your consultation is booked, <OrgName fallback="your designers" /> will add you to a project chat with your designer. You&apos;ll get a notification when it&apos;s ready.
               </p>
             </div>
           </div>
@@ -252,6 +257,7 @@ export default function CustomerHomePage() {
         </section>
       )}
 
+      {hasModule(user, "referrals") && (
       <Link href="/home/refer" className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 to-violet-600/10 border border-amber-500/25 hover:border-amber-400/50 transition">
         <Gift className="h-6 w-6 text-amber-300 shrink-0" aria-hidden />
         <span className="flex-1">
@@ -260,6 +266,7 @@ export default function CustomerHomePage() {
         </span>
         <ChevronRight className="h-4 w-4 text-slate-500" />
       </Link>
+      )}
 
       {/* Services */}
       {services.length > 0 && (

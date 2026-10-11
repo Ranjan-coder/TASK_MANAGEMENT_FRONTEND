@@ -29,20 +29,29 @@ import {
   Gift,
   Network,
   Building2,
+  Globe,
+  CalendarCheck,
   X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { can, ROLE_LABELS } from "@/lib/permissions";
+import { canOpenPage } from "@/lib/modules";
+import { ProductLogo, useAppName } from "@/lib/brand";
 import type { Permission } from "@/types";
 
 export function Sidebar() {
   const pathname = usePathname();
   const user = useAuthStore((s) => s.user);
+  const appName = useAppName();
   const totalUnread = useChatStore((s) => s.totalUnread);
   const isMobileSidebarOpen = useUIStore((s) => s.isMobileSidebarOpen);
   const setMobileSidebarOpen = useUIStore((s) => s.setMobileSidebarOpen);
 
+  // The product owner's menu: their console and account settings only
+  const PLATFORM_OWNER_NAV = new Set(["/platform", "/platform/structure", "/notifications", "/settings"]);
   const navItems = [
+    { label: "Organisations", href: "/platform", icon: Globe, roles: ["platform_owner"] },
+    { label: "Standard structure", href: "/platform/structure", icon: Network, roles: ["platform_owner"] },
     // Customers and marketing have no access to tasks/dashboard (enforced by the API too)
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["superadmin", "admin", "user"] },
     { label: "Tasks", href: "/tasks", icon: CheckSquare, roles: ["superadmin", "admin", "user"] },
@@ -68,6 +77,8 @@ export function Sidebar() {
       roles: ["admin", "superadmin"]
     },
     { label: "Organisation", href: "/admin/organisation", icon: Building2, roles: ["admin", "superadmin"] },
+    // Planner: on by default for staff (menu follows the module: hidden if switched off)
+    { label: "Planner", href: "/planner", icon: CalendarCheck },
     { label: "Org chart", href: "/org", icon: Network, roles: ["superadmin", "admin", "marketing", "user", "leadership"] },
     { label: "Notifications", href: "/notifications", icon: Bell },
     {
@@ -78,6 +89,12 @@ export function Sidebar() {
     },
     { label: "Settings", href: "/settings", icon: Settings }
   ];
+  // The highlighted item: the longest link that is a prefix of this page
+  // ("/platform/structure" beats "/platform"), one pass over the menu
+  const activeHref = navItems.reduce<string | null>(
+    (best, { href }) => ((pathname === href || pathname.startsWith(`${href}/`)) && href.length > (best?.length ?? -1) ? href : best),
+    null
+  );
 
   return (
     <>
@@ -103,11 +120,11 @@ export function Sidebar() {
         {/* Brand Header */}
         <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-600 to-blue-600 flex items-center justify-center text-white font-black text-lg shadow-md shadow-violet-600/30">
-              T
-            </div>
+            <ProductLogo className="h-9 w-9" />
             <div>
-              <span className="font-bold text-base text-white tracking-tight block">TaskManager</span>
+              <span className="font-bold text-base text-white tracking-tight block truncate max-w-[150px]" title={appName}>
+                {appName}
+              </span>
               <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider block">Enterprise Hub</span>
             </div>
           </div>
@@ -125,10 +142,13 @@ export function Sidebar() {
         {/* Nav Links */}
         <div className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
           {navItems
+            .filter((item) => user?.role !== "platform_owner" || PLATFORM_OWNER_NAV.has(item.href))
+            // Screens of modules the organisation doesn't have
+            .filter((item) => user?.role === "platform_owner" || canOpenPage(user, item.href))
             .filter((item) => !item.roles || (user && item.roles.includes(user.role)) || ("perms" in item && can(user, ...((item as { perms?: Permission[] }).perms ?? []))))
             .map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const isActive = item.href === activeHref;
               return (
                 <Link
                   key={item.href}

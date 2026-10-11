@@ -159,8 +159,6 @@ export const paymentsApi = {
   },
 
   myReferrals: () => apiClient.get<ApiResponse<MyReferrals>>("/referrals/mine").then((r) => r.data.data),
-  checkReferral: (code: string) =>
-    apiClient.get<ApiResponse<{ valid: boolean; referrerFirstName?: string; friendReward?: string }>>(`/customer/auth/referral/${encodeURIComponent(code)}`).then((r) => r.data.data),
   adminReferrals: (status?: string) =>
     apiClient
       .get<ApiResponse<{ rows: AdminReferral[]; counts: Record<string, number>; programme: { enabled: boolean; referrerReward: string; friendReward: string; terms: string } }>>(
@@ -173,6 +171,6 @@ export const paymentsApi = {
 
 /** upi:// link that opens the customer's UPI app with the amount filled in. */
 export const upiLink = (payTo: PayTo, amountPaise: number, note: string) => {
-  const params = new URLSearchParams({ pa: payTo.upiId, pn: payTo.companyName || "Bonito", am: (amountPaise / 100).toFixed(2), cu: "INR", tn: note.slice(0, 50) });
+  const params = new URLSearchParams({ pa: payTo.upiId, pn: payTo.companyName || "Payee", am: (amountPaise / 100).toFixed(2), cu: "INR", tn: note.slice(0, 50) });
   return `upi://pay?${params.toString()}`;
 };

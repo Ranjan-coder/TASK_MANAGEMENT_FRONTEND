@@ -11,12 +11,14 @@ import { tasksApi } from "../../../../lib/api/tasks.api";
 import { orgApi } from "@/lib/api/org.api";
 import { useAuthStore } from "../../../../store/authStore";
 import { OrgFields, type OrgValue } from "@/components/shared/OrgFields";
+import { ModuleAccessPanel } from "@/components/shared/ModuleAccessPanel";
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { Permission, User } from "@/types";
 
 const errMsg = (err: unknown, fallback: string) =>
   (err as { response?: { data?: { message?: string } } })?.response?.data?.message || fallback;
 const idOf = (v: User["reportsTo"]) => (!v ? null : typeof v === "string" ? v : v._id);
+const MODULE_LABELS: Record<string, string> = { leads: "Leads", payments: "Payments", performance: "Performance", projects: "Projects" };
 const ROLE_ORDER = ["customer", "user", "marketing", "leadership", "admin", "superadmin"] as const;
 
 export default function UserDetailPage() {
@@ -198,6 +200,7 @@ export default function UserDetailPage() {
         )}
       </div>
 
+      {isSuperAdmin && <ModuleAccessPanel user={user} onSaved={refresh} />}
       {isSuperAdmin && <PermissionsPanel user={user} onSaved={refresh} />}
 
       {/* Direct reports */}
@@ -273,7 +276,7 @@ function PermissionsPanel({ user, onSaved }: { user: User; onSaved: () => void }
       ) : (
         <>
           <p className="text-slate-500 text-sm mb-4">
-            Give one extra ability without a bigger role. Anyone with an extra permission must use two-factor sign-in.
+            Give one extra ability without a bigger role. Each works only while the person also has its module. Anyone with an extra permission must use two-factor sign-in.
           </p>
           <div className="space-y-2">
             {catalog.permissions.map((p) => {
@@ -297,6 +300,7 @@ function PermissionsPanel({ user, onSaved }: { user: User; onSaved: () => void }
                   <span>
                     {p.label}
                     {fromRole && <span className="ml-2 text-xs text-slate-500">(included in {ROLE_LABELS[user.role]})</span>}
+                    {p.module && <span className="ml-2 text-[11px] text-slate-500">· {MODULE_LABELS[p.module] ?? p.module} module</span>}
                   </span>
                 </label>
               );

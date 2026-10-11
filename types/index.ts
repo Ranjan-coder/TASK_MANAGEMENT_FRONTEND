@@ -1,4 +1,7 @@
-export type Role = "superadmin" | "admin" | "marketing" | "user" | "leadership" | "customer";
+// "platform_owner" is the product owner: above every organisation, never inside one
+export type Role = "superadmin" | "admin" | "marketing" | "user" | "leadership" | "customer" | "platform_owner";
+// Roles an organisation can assign (never the product owner)
+export type OrgRole = Exclude<Role, "platform_owner">;
 
 // Roles that use the staff app (everything except customers)
 export const STAFF_ROLES: Role[] = ["superadmin", "admin", "marketing", "user", "leadership"];
@@ -12,6 +15,13 @@ export interface User {
   _id: string;
   name: string;
   email: string;
+  // The organisation this account belongs to (from /auth/me)
+  // brandName: shown instead of the product name (branding module + display name set by the product owner)
+  organisation?: { _id: string; name: string; slug: string; brandName?: string | null; modules?: string[] } | null;
+  // Modules this person can use: the organisation's AND the ones they were given (/auth/me)
+  modules?: string[];
+  // What a superadmin gave them (all: null = the role's default)
+  moduleAccess?: { all: boolean | null; keys: string[]; version: number };
   role: Role;
   avatarUrl?: string;
   department?: string;

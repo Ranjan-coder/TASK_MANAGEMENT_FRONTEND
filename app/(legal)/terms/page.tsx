@@ -1,4 +1,4 @@
-export const metadata = { title: "Terms of Use — Bonito" };
+export const metadata = { title: "Terms of Use — Serenx" };
 
 export default function TermsPage() {
   return (
@@ -12,7 +12,7 @@ export default function TermsPage() {
       </ul>
       <h2>Respectful communication</h2>
       <p>
-        Abusive, threatening or harassing messages toward Bonito staff or other users are not allowed and may lead to
+        Abusive, threatening or harassing messages toward staff or other users are not allowed and may lead to
         the chat being reviewed and the account being suspended.
       </p>
       <h2>Offers</h2>

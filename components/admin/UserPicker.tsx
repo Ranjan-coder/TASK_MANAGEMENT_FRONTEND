@@ -56,7 +56,8 @@ export function UserPicker({ id, label, kind, value, onChange, multiple = false,
       try {
         const res = await usersApi.getUsers({
           search: query || undefined,
-          role: kind === "customer" ? "customer" : undefined,
+          // The server filters (staff = every role except customers), so a page is never short
+          role: kind === "customer" ? "customer" : "staff",
           status: "active",
           limit: 50
         });

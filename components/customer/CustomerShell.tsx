@@ -3,15 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Home, MessageSquare, Settings, LogOut } from "lucide-react";
+import { Home, MessageSquare, Settings, LogOut, CalendarCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useChatStore } from "@/store/chatStore";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { cn, getInitials, sizedImage } from "@/lib/utils";
+import { canOpenPage } from "@/lib/modules";
+import { AppName, ProductLogo } from "@/lib/brand";
+
 
 const TABS = [
   { label: "Home", href: "/home", icon: Home },
-  { label: "Chat", href: "/chat", icon: MessageSquare }
+  { label: "Chat", href: "/chat", icon: MessageSquare },
+  // Only if the organisation opened the Planner to customers (filtered by canOpenPage)
+  { label: "Planner", href: "/planner", icon: CalendarCheck }
 ];
 
 /**
@@ -33,6 +38,8 @@ export function CustomerShell({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
+  // Chat only when the organisation has it
+  const tabs = TABS.filter((t) => canOpenPage(user, t.href));
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   const inConversation = pathname.startsWith("/chat/");
 
@@ -40,14 +47,12 @@ export function CustomerShell({ children }: { children: React.ReactNode }) {
     <div className="flex flex-col h-[100dvh] w-screen overflow-hidden bg-slate-950 text-slate-100">
       <header className="h-14 md:h-16 shrink-0 border-b border-slate-800 bg-slate-900/90 backdrop-blur-xl px-4 md:px-6 flex items-center justify-between gap-4 z-30">
         <Link href="/home" className="flex items-center gap-2.5">
-          <span className="h-8 w-8 rounded-xl bg-gradient-to-br from-violet-600 to-blue-600 flex items-center justify-center text-white font-black">
-            B
-          </span>
-          <span className="font-bold tracking-tight text-white">Bonito</span>
+          <ProductLogo className="h-8 w-8" />
+          <span className="font-bold tracking-tight text-white truncate max-w-[50vw]"><AppName /></span>
         </Link>
 
         <nav aria-label="Main" className="hidden md:flex items-center gap-1">
-          {TABS.map(({ label, href, icon: Icon }) => (
+          {tabs.map(({ label, href, icon: Icon }) => (
             <Link
               key={href}
               href={href}
@@ -124,7 +129,7 @@ export function CustomerShell({ children }: { children: React.ReactNode }) {
           inConversation && "hidden"
         )}
       >
-        {TABS.map(({ label, href, icon: Icon }) => (
+        {tabs.map(({ label, href, icon: Icon }) => (
           <Link
             key={href}
             href={href}

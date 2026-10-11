@@ -27,6 +27,7 @@ import { LeaveStatus } from "@/components/shared/LeaveStatus";
 import { ReportsSection } from "@/components/shared/ReportsSection";
 import { NotificationsSection } from "@/components/shared/NotificationsSection";
 import { PrivacySection } from "@/components/shared/PrivacySection";
+import { hasModule } from "@/lib/modules";
 import { prepareCurrentPassword, prepareNewPassword, finishSignIn } from "../../../lib/auth/credentials";
 import { resealBundleForNewPassword, WrongPasswordError } from "../../../lib/crypto/keyBundle";
 import { passwordPolicyError } from "../../../lib/crypto/passwordKeys";
@@ -59,6 +60,12 @@ export default function SettingsPage() {
     if (user?.mustChangePassword) setActiveSection("security");
   }, [user?.mustChangePassword]);
 
+  // The product owner has no organisation profile, chats or personal data here
+  const isPlatformOwner = user?.role === "platform_owner";
+  useEffect(() => {
+    if (isPlatformOwner && !["security", "sessions"].includes(activeSection)) setActiveSection("security");
+  }, [isPlatformOwner, activeSection]);
+
   const passwordMutation = useMutation({
     mutationFn: async () => {
       // Passwords never leave the browser: derive keys for the old and new one,
@@ -87,8 +94,9 @@ export default function SettingsPage() {
       const updated = res.data?.data?.user;
       if (updated) {
         setUser(updated);
-        // Cache the new wrapKey here; creates chat keys if this is the first real password
-        await finishSignIn(updated._id, wrapKey);
+        // Cache the new wrapKey here; creates chat keys if this is the first real password.
+        // Same rule as sign-in: only where chat or the (encrypted) Planner is available.
+        if (hasModule(updated, "chat") || hasModule(updated, "planner")) await finishSignIn(updated._id, wrapKey);
       }
       toast.success("Password changed. Other devices have been signed out.");
     },
@@ -206,12 +214,17 @@ export default function SettingsPage() {
     onError: () => toast.error("Couldn't sign out other devices")
   });
 
-  const sections = [
+  const sections = isPlatformOwner
+    ? [
+        { id: "security", label: "Security", icon: Shield },
+        { id: "sessions", label: "Devices", icon: Laptop }
+      ]
+    : [
     { id: "profile", label: "Profile & Avatar", icon: User },
     { id: "security", label: "Security", icon: Shield },
     { id: "sessions", label: "Devices", icon: Laptop },
-    { id: "encryption", label: "Chat Encryption", icon: Key },
-    ...(user && user.role !== "marketing" ? [{ id: "reports", label: "Reports", icon: Flag }] : []),
+    ...(hasModule(user, "chat") ? [{ id: "encryption", label: "Chat Encryption", icon: Key }] : []),
+    ...(user && user.role !== "marketing" && hasModule(user, "reports") ? [{ id: "reports", label: "Reports", icon: Flag }] : []),
     { id: "notifications", label: "Notifications", icon: BellRing },
     { id: "privacy", label: "Privacy & data", icon: ShieldCheck }
   ];

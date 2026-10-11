@@ -1,5 +1,7 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { canOpenPage } from "@/lib/modules";
+import type { User } from "@/types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -41,18 +43,28 @@ export function getInitials(name?: string): string {
  * go straight to Settings → Security; customers start on the portal home;
  * marketing (no task access) starts in the content manager.
  */
-export function homeRouteFor(user?: { role?: string; mustChangePassword?: boolean } | null): string {
+export function homeRouteFor(user?: Pick<User, "role" | "mustChangePassword" | "organisation"> | null): string {
   if (!user) return "/login";
   if (user.mustChangePassword) return "/settings?section=security";
+  if (user.role === "platform_owner") return "/platform";
   if (user.role === "customer") return "/home";
-  if (user.role === "marketing") return "/admin/campaigns";
-  if (user.role === "leadership") return "/admin/overview";
-  return "/dashboard";
+  // The first usable screen for this role, given the organisation's modules
+  const choices =
+    user.role === "marketing"
+      ? ["/admin/campaigns", "/admin/leads", "/chat"]
+      : user.role === "leadership"
+        ? ["/admin/overview", "/admin/projects", "/org"]
+        : ["/dashboard", "/chat", "/org"];
+  return choices.find((path) => canOpenPage(user as User, path)) || "/notifications";
 }
 
 // Staff-app areas that customers, marketing and leadership accounts cannot use
 export const RESTRICTED_FOR_LIMITED_ROLES = ["/dashboard", "/tasks", "/users", "/audit-logs"];
 export const LIMITED_ROLES = ["customer", "marketing", "leadership"];
+
+// The product owner's console, and the only screens that role may use
+export const PLATFORM_ROUTES = ["/platform"];
+export const PLATFORM_OWNER_ROUTES = ["/platform", "/settings", "/notifications"];
 
 // Customer-portal-only areas
 export const CUSTOMER_ONLY_ROUTES = ["/home"];

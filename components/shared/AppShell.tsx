@@ -7,6 +7,8 @@ import { LiveConnection } from "./LiveConnection";
 import { ReplyReminderPopup } from "./ReplyReminder";
 import { CustomerShell } from "@/components/customer/CustomerShell";
 import { useAuth } from "@/hooks/useAuth";
+import { hasModule } from "@/lib/modules";
+import { useBrandedTitle } from "@/lib/brand";
 
 /**
  * Picks the frame for the signed-in user: the customer portal (Home + Chat)
@@ -15,6 +17,7 @@ import { useAuth } from "@/hooks/useAuth";
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  useBrandedTitle();
 
   if (isLoading && !user) {
     return (
@@ -39,7 +42,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
       <AccountGate />
       <LiveConnection />
-      {user && ["superadmin", "admin", "user"].includes(user.role) && <ReplyReminderPopup />}
+      {user && ["superadmin", "admin", "user"].includes(user.role) && hasModule(user, "chat") && <ReplyReminderPopup />}
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden bg-slate-950">
         <Topbar />

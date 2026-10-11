@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import { Conversation, ConversationMember } from "@/types/chat";
+import { OrgName, orgNameNow } from "@/lib/brand";
 import {
   removeMember,
   updateConversation,
@@ -56,7 +57,7 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
     if (refId(project.backupDesigner) === userId) return "Backup designer";
     if (refId(project.manager) === userId) return "Project manager";
     if (project.customers.some((c) => refId(c) === userId)) return "Customer";
-    return "Bonito team";
+    return `${orgNameNow("Our")} team`;
   };
 
   // ── Rename group ────────────────────────────────────────────────────────────
@@ -181,7 +182,7 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
         {project && (
           <p className="text-[11px] text-center text-slate-500 px-2">
             Project chat · {{ active: "Active", on_hold: "On hold", completed: "Completed" }[project.status]}. The team is managed by
-            Bonito — contact us to add or change people.
+            <OrgName /> — contact us to add or change people.
           </p>
         )}
         {project && (

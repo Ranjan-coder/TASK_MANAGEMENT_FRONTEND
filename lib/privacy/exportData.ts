@@ -79,7 +79,7 @@ export async function downloadMyData(myUserId: string, onProgress: (p: ExportPro
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `bonito-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `serenx-my-data-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();

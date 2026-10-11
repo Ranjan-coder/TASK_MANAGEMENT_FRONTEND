@@ -6,6 +6,7 @@ import { ArrowLeft, Copy, Gift, Share2, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { paymentsApi } from "@/lib/api/payments.api";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store/authStore";
 
 const STATUS: Record<string, { label: string; style: string }> = {
   signed_up: { label: "Joined", style: "border-sky-500/40 text-sky-200" },
@@ -18,12 +19,17 @@ const STATUS: Record<string, { label: string; style: string }> = {
 export default function ReferPage() {
   const { data, isLoading } = useQuery({ queryKey: ["my-referrals"], queryFn: paymentsApi.myReferrals });
 
-  const shareText = data?.link ? `I'm doing my home interiors with Bonito. Sign up with my code ${data.code} — ${data.friendReward}: ${data.link}` : "";
+  const orgName = useAuthStore((s) => s.user?.organisation?.name) || "my interior designer";
+  // Customers are added by the organisation (no public sign-up), so the friend
+  // gives this code to the team when they get in touch
+  const shareText = data?.code
+    ? `I'm doing my home interiors with ${orgName}. Mention my referral code ${data.code} when you contact them — ${data.friendReward}.`
+    : "";
   const share = async () => {
-    if (!data?.link) return;
+    if (!shareText) return;
     if (navigator.share) {
       try {
-        await navigator.share({ title: "Bonito Interiors", text: shareText, url: data.link });
+        await navigator.share({ title: orgName, text: shareText });
       } catch {
         /* cancelled */
       }
@@ -62,7 +68,7 @@ export default function ReferPage() {
                     <MessageCircle className="h-4 w-4" /> Share on WhatsApp
                   </a>
                   <button type="button" onClick={share} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-600 text-slate-100 text-sm">
-                    <Share2 className="h-4 w-4" /> Share link
+                    <Share2 className="h-4 w-4" /> Share
                   </button>
                 </div>
               </>

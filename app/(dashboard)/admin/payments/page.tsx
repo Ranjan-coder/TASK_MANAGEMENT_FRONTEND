@@ -397,10 +397,10 @@ function PaymentSettings({ onClose }: { onClose: () => void }) {
         </div>
         <div className="p-5 space-y-3">
           <p className="text-xs text-slate-400">Shown to customers on their Payments page and receipts. Changes are recorded in the audit log — double-check account numbers.</p>
-          {F({ k: "companyName", label: "Company name", placeholder: "Bonito Interiors Pvt Ltd" })}
+          {F({ k: "companyName", label: "Company name", placeholder: "Your Company Pvt Ltd" })}
           {F({ k: "companyAddress", label: "Address (for receipts)" })}
           {F({ k: "gstin", label: "GSTIN", placeholder: "29ABCDE1234F1Z5", mono: true })}
-          {F({ k: "upiId", label: "UPI ID", placeholder: "bonito@okhdfc", mono: true })}
+          {F({ k: "upiId", label: "UPI ID", placeholder: "yourbusiness@okhdfc", mono: true })}
           <div className="grid grid-cols-2 gap-3">
             {F({ k: "bankName", label: "Bank" })}
             {F({ k: "accountName", label: "Account name" })}

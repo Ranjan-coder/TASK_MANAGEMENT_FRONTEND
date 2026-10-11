@@ -38,6 +38,12 @@ export function notificationTarget(n: NotificationLike, role: Role): string | nu
       return isAdmin ? "/admin/performance" : null;
     case "consultation_request":
       return isAdmin || role === "marketing" ? "/admin/leads" : null;
+    case "planner_reminder":
+      return n.title === "Meeting soon" ? "/planner?tab=meetings" : "/planner?tab=reminders";
+    case "meeting_invite":
+    case "meeting_updated":
+    case "meeting_cancelled":
+      return "/planner?tab=meetings";
     case "security_alert":
       if (/deletion request/i.test(n.title)) return isAdmin && /^Account deletion/.test(n.title) ? "/admin/privacy" : "/settings?section=privacy";
       return "/settings?section=sessions";
@@ -65,8 +71,12 @@ export const NOTIFICATION_ICONS: Record<string, string> = {
   rating_alert: "⭐",
   moderation_alert: "⚠️",
   attachment_added: "📎",
-  link_added: "🔗"
+  link_added: "🔗",
+  planner_reminder: "⏰",
+  meeting_invite: "📅",
+  meeting_updated: "📅",
+  meeting_cancelled: "🚫"
 };
 
 /** Types that deserve a toast with an "Open" button (sla_reminder has its own popup). */
-export const URGENT_TYPES = new Set(["sla_escalated", "moderation_alert", "report_update", "rating_alert"]);
+export const URGENT_TYPES = new Set(["sla_escalated", "moderation_alert", "report_update", "rating_alert", "planner_reminder"]);

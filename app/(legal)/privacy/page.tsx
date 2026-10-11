@@ -1,35 +1,35 @@
-export const metadata = { title: "Privacy Policy — Bonito" };
+export const metadata = { title: "Privacy Policy — Serenx" };
 
 /*
  * DRAFT — written to match how the app actually works (2026-09-28). Items in
  * [square brackets] must be filled in, and the whole text reviewed by
- * Bonito's legal advisor, before launch. Keep the version below in step with
+ * the legal advisor, before launch. Keep the version below in step with
  * PRIVACY_POLICY_VERSION in the backend .env (it's recorded with each consent).
  */
 export default function PrivacyPage() {
   return (
     <>
       <h1>Privacy Policy</h1>
-      <p>Version 2026-09-28 · [Bonito legal entity name], [registered address]</p>
+      <p>Version 2026-09-28 · [Serenx legal entity name], [registered address]</p>
       <p>
-        This policy explains what personal data the Bonito app collects, why, how long we keep it and your rights under India&apos;s Digital
+        This policy explains what personal data the Serenx app collects, why, how long we keep it and your rights under India&apos;s Digital
         Personal Data Protection Act, 2023 (&ldquo;DPDP Act&rdquo;).
       </p>
 
       <h2>What we collect</h2>
       <ul>
         <li><strong>Account details:</strong> your name, email address and mobile number, and the date and version of the terms you accepted.</li>
-        <li><strong>Project details:</strong> your project name, stage and timeline, the Bonito team working with you, and design approvals you give (the design title, your decision, comment and time).</li>
+        <li><strong>Project details:</strong> your project name, stage and timeline, the team working with you, and design approvals you give (the design title, your decision, comment and time).</li>
         <li><strong>Consultation requests</strong> you make from offers, and <strong>ratings and reports</strong> you submit.</li>
         <li><strong>Sign-in and security records:</strong> device type, time and IP address of sign-ins, used to protect your account.</li>
-        <li><strong>Chat messages and files.</strong> Chats are end-to-end encrypted: they are encrypted on your device and only the people in the chat can read them. Bonito&apos;s servers store them in encrypted form and cannot read them.</li>
+        <li><strong>Chat messages and files.</strong> Chats are end-to-end encrypted: they are encrypted on your device and only the people in the chat can read them. Our servers store them in encrypted form and cannot read them.</li>
       </ul>
 
       <h2>How we use it</h2>
       <ul>
         <li>To provide our interior design services and connect you with your design team.</li>
         <li>To verify your mobile number and let you reset your password with one-time codes sent by SMS.</li>
-        <li>To show you offers, products and past projects from Bonito, and to follow up consultation requests you make.</li>
+        <li>To show you offers, products and past projects from the organisation you work with, and to follow up consultation requests you make.</li>
         <li>To measure and improve how quickly our team replies, and to review reports and ratings.</li>
         <li>To keep the service safe (for example, detecting unusual sign-ins).</li>
       </ul>
@@ -44,11 +44,11 @@ export default function PrivacyPage() {
       <ul>
         <li>
           Before a message is sent, the app checks it <strong>on your device</strong> against a list of abusive words. If it finds any, it asks if you want to send
-          anyway. If you do, Bonito receives only the number of flagged words and their severity — not the message. If a chat reaches a set number of flagged
-          words, Bonito management is alerted.
+          anyway. If you do, the organisation receives only the number of flagged words and their severity — not the message. If a chat reaches a set number of flagged
+          words, its management is alerted.
         </li>
         <li>
-          If you <strong>report</strong> someone, the messages you choose to include are shared with Bonito admins, together with a cryptographic proof (message
+          If you <strong>report</strong> someone, the messages you choose to include are shared with the organisation&apos;s admins, together with a cryptographic proof (message
           franking) that shows they are genuine and unedited. Nothing else in the chat is revealed. Screenshots you attach are stored privately and their
           location data is removed.
         </li>
@@ -56,7 +56,7 @@ export default function PrivacyPage() {
 
       <h2>Who we share it with</h2>
       <ul>
-        <li>Your design team and Bonito staff who need it for your project. Marketing staff can see your contact details to follow up consultation requests.</li>
+        <li>Your design team and the organisation&apos;s staff who need it for your project. Marketing staff can see your contact details to follow up consultation requests.</li>
         <li>Service providers who process data for us: cloud hosting and database ([provider]), file storage (Cloudinary), SMS and WhatsApp delivery ([provider]), email ([provider]), and your browser&apos;s push notification service.</li>
         <li>Authorities, when the law requires it.</li>
         <li>We do not sell your personal data.</li>
@@ -84,7 +84,7 @@ export default function PrivacyPage() {
       <p>[Name], [designation] — [email] · [phone]. We respond within [7] days.</p>
 
       <h2>Children</h2>
-      <p>The Bonito app is for adults. We do not knowingly collect data from anyone under 18.</p>
+      <p>The Serenx app is for adults. We do not knowingly collect data from anyone under 18.</p>
 
       <h2>Changes</h2>
       <p>If we change this policy in a way that affects you, we&apos;ll tell you in the app and ask for your consent again where required.</p>

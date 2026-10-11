@@ -10,7 +10,9 @@ import Link from "next/link";
 import { OrgFields, type OrgValue } from "@/components/shared/OrgFields";
 import { useDepartments, useDesignations } from "@/hooks/useOrg";
 import { ROLE_LABELS } from "@/lib/permissions";
-import type { Role } from "@/types";
+import type { OrgRole, Role } from "@/types";
+import { toast } from "sonner";
+import { canOpenPage } from "@/lib/modules";
 
 const EMPTY_FORM: CreateUserPayload = { name: "", email: "", password: "", role: "user", departmentId: null, designationId: null, reportsTo: null };
 const ADMIN_CREATABLE: Role[] = ["user", "marketing", "customer"];
@@ -63,7 +65,8 @@ export default function UsersPage() {
       usersApi
         .getUsers({
           search: debouncedSearch,
-          role: roleFilter || undefined,
+          // The organisation's team only; customers are on Admin → Customers
+          role: roleFilter || "staff",
           status: statusFilter || undefined,
           departmentId: deptFilter || undefined,
           designationId: desigFilter || undefined
@@ -81,8 +84,15 @@ export default function UsersPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: typeof createForm) => usersApi.createUser(data),
-    onSuccess: () => {
+    onSuccess: (_res, data) => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
+      // Sign-in needs the organisation code (D-R1): remind the admin to send it with the password
+      const code = currentUser?.organisation?.slug;
+      if (code) {
+        const link = `${window.location.origin}/login?org=${encodeURIComponent(code)}`;
+        const where = data.role === "customer" ? " They'll appear under Customers, not in this staff list." : "";
+        toast.success(`Account created for ${data.email}. Send them the password, the organisation code "${code}" and this link: ${link}.${where}`, { duration: 15000 });
+      }
       setShowCreateModal(false);
       setCreateForm(EMPTY_FORM);
       setRoleTouched(false);
@@ -99,7 +109,7 @@ export default function UsersPage() {
 
   // A designation suggests a role (D4: it never grants access by itself); the admin can change it
   const suggestRole = (role: Role) => {
-    if (!roleTouched && creatableRoles.includes(role)) setCreateForm((f) => ({ ...f, role }));
+    if (!roleTouched && role !== "platform_owner" && creatableRoles.includes(role)) setCreateForm((f) => ({ ...f, role }));
   };
 
   return (
@@ -108,7 +118,17 @@ export default function UsersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">User Management</h1>
-          <p className="text-slate-400 text-sm mt-0.5">{data?.meta?.total ?? 0} total users</p>
+          <p className="text-slate-400 text-sm mt-0.5">
+            {data?.meta?.total ?? 0} staff
+            {canOpenPage(currentUser, "/admin/customers") && (
+              <>
+                {" · "}
+                <Link href="/admin/customers" className="text-violet-300 hover:text-violet-200 underline-offset-2 hover:underline">
+                  Customers are listed separately
+                </Link>
+              </>
+            )}
+          </p>
         </div>
         <button
           id="create-user-btn"
@@ -133,13 +153,12 @@ export default function UsersPage() {
           onChange={(e) => setRoleFilter(e.target.value)}
           className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
         >
-          <option value="">All Roles</option>
+          <option value="">All staff</option>
           <option value="superadmin">Super Admin</option>
           <option value="admin">Admin</option>
           <option value="marketing">Marketing</option>
           <option value="user">Staff</option>
           <option value="leadership">Leadership</option>
-          <option value="customer">Customer</option>
         </select>
         <select
           value={deptFilter}
@@ -299,7 +318,7 @@ export default function UsersPage() {
                   value={createForm.role}
                   onChange={(e) => {
                     setRoleTouched(true);
-                    const role = e.target.value as Role;
+                    const role = e.target.value as OrgRole;
                     // Customers have no department, designation or manager
                     setCreateForm((f) => ({ ...f, role, ...(role === "customer" && { departmentId: null, designationId: null, reportsTo: null }) }));
                   }}
@@ -313,6 +332,23 @@ export default function UsersPage() {
                   The role decides what they can do in the app. Picking a designation suggests one — check it before creating.
                 </p>
               </div>
+              {isCustomerForm && (
+                <div>
+                  <label htmlFor="create-user-referral" className="block text-sm font-medium text-slate-300 mb-1.5">
+                    Referral code <span className="text-slate-500 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    id="create-user-referral"
+                    type="text"
+                    maxLength={20}
+                    value={createForm.referralCode ?? ""}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, referralCode: e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "") }))}
+                    placeholder="e.g. BON-AB12CD"
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                  />
+                  <p className="text-xs text-slate-500 mt-1.5">The code of the customer who referred them, if they gave one.</p>
+                </div>
+              )}
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => { setShowCreateModal(false); setCreateError(""); }} className="flex-1 py-2.5 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-700 transition text-sm">

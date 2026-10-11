@@ -1,31 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
-import { fetchConversations, createGroup } from "@/lib/api/chat.api";
+import { fetchConversations, createGroup, type DirectoryPerson } from "@/lib/api/chat.api";
+import { useChatPeople } from "@/hooks/useStaffDirectory";
 import { createInitialGroupKeys } from "@/lib/crypto/conversationKeys";
 import { X, Users, Search, Plus, Loader2, ShieldCheck, Lock } from "lucide-react";
 import { toast } from "sonner";
 
 interface Props {
   onClose: () => void;
-}
-
-import { usersApi } from "@/lib/api/users.api";
-
-// Simple user search — uses usersApi
-async function searchUsers(query: string) {
-  try {
-    const res = await usersApi.getUsers({
-      search: query.trim() || undefined,
-      limit: 20
-    });
-    return res.data?.data || [];
-  } catch {
-    return [];
-  }
 }
 
 export function GroupCreateModal({ onClose }: Props) {
@@ -35,24 +21,15 @@ export function GroupCreateModal({ onClose }: Props) {
 
   const [name, setName] = useState("");
   const [search, setSearch] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [selected, setSelected] = useState<any[]>([]);
-  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState<DirectoryPerson[]>([]);
   const [creating, setCreating] = useState(false);
+  // Colleagues in my organisation who have chat (never customers), from 2 letters on
+  const searching2 = search.trim().length >= 2;
+  const { people: searchResults, loading: searching, hasMore, loadMore, loadingMore } = useChatPeople(search, searching2);
+  // O(1) "is this person selected?" per row
+  const selectedIds = useMemo(() => new Set(selected.map((s) => s._id)), [selected]);
 
-  const handleSearch = async (q: string) => {
-    setSearch(q);
-    if (q.trim().length < 2) { setSearchResults([]); return; }
-    setSearching(true);
-    try {
-      const results = await searchUsers(q.trim());
-      setSearchResults(results.filter((u: any) => u._id !== user?._id));
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const toggleUser = (u: any) => {
+  const toggleUser = (u: DirectoryPerson) => {
     setSelected((prev) =>
       prev.some((s) => s._id === u._id)
         ? prev.filter((s) => s._id !== u._id)
@@ -71,11 +48,11 @@ export function GroupCreateModal({ onClose }: Props) {
       // set up chat. Others receive it automatically once they have keys.
       const { keys: encryptedGroupKeys, missing } = await createInitialGroupKeys(
         user._id,
-        selected.map((m: any) => ({ _id: m._id, publicKey: m.publicKey, keyVersion: m.keyVersion }))
+        selected.map((m) => ({ _id: m._id, publicKey: m.publicKey ?? undefined, keyVersion: m.keyVersion }))
       );
       const membersWithoutKeys = selected
-        .filter((m: any) => missing.includes(m._id))
-        .map((m: any) => m.name || m.email);
+        .filter((m) => missing.includes(m._id))
+        .map((m) => m.name);
 
       const conv = await createGroup({
         type: "group",
@@ -170,8 +147,8 @@ export function GroupCreateModal({ onClose }: Props) {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
               <input
                 value={search}
-                onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Search by name or email…"
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search coworkers by name…"
                 className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-violet-500/50 transition"
               />
               {searching && (
@@ -180,10 +157,10 @@ export function GroupCreateModal({ onClose }: Props) {
             </div>
 
             {/* Results */}
-            {searchResults.length > 0 && (
+            {searching2 && searchResults.length > 0 && (
               <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
                 {searchResults.map((u) => {
-                  const isSelected = selected.some((s) => s._id === u._id);
+                  const isSelected = selectedIds.has(u._id);
                   return (
                     <button
                       key={u._id}
@@ -206,7 +183,7 @@ export function GroupCreateModal({ onClose }: Props) {
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-500 truncate">{u.email}</p>
+                        {u.designation && <p className="text-xs text-slate-500 truncate">{u.designation}</p>}
                       </div>
                       <div
                         className={`h-5 w-5 rounded-full border flex items-center justify-center transition ${
@@ -220,6 +197,11 @@ export function GroupCreateModal({ onClose }: Props) {
                     </button>
                   );
                 })}
+                {hasMore && (
+                  <button onClick={loadMore} disabled={loadingMore} className="w-full py-1.5 text-xs text-violet-300 hover:text-violet-200 disabled:opacity-50">
+                    {loadingMore ? "Loading…" : "Show more"}
+                  </button>
+                )}
               </div>
             )}
           </div>

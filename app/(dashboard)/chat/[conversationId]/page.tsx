@@ -34,6 +34,7 @@ import { useProjectApprovals, useProjectStage, ApprovalCard, RequestApprovalDial
 import { extrasApi, stageLabel, type Timeline, type DesignApproval } from "@/lib/api/projectExtras.api";
 import { useOffensiveConfirm, ModerationWarningPopup } from "../components/ModerationUI";
 import { checkMessage, recordPrevented, loadLexicon } from "@/lib/moderation/lexicon";
+import { hasModule } from "@/lib/modules";
 import { EditCancelledError, type ModerationFlag } from "@/lib/crypto/conversationKeys";
 import { Conversation, Message, KeyRef } from "@/types/chat";
 import { cn } from "@/lib/utils";
@@ -375,7 +376,7 @@ export default function ConversationPage() {
   );
   const isProjectChat = Boolean(conv?.project);
   useEffect(() => {
-    if (isProjectChat) loadLexicon(); // warm the word list so the first send isn't delayed
+    if (isProjectChat && hasModule(useAuthStore.getState().user, "moderation")) loadLexicon(); // warm the word list so the first send isn't delayed
   }, [isProjectChat]);
 
   const handleSend = useCallback(

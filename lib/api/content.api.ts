@@ -182,7 +182,7 @@ export function ctaHref(cta: CampaignCta): string | null {
     case "call":
       return `tel:${cta.value}`;
     case "whatsapp":
-      return `https://wa.me/${cta.value.replace(/\D/g, "")}?text=${encodeURIComponent("Hi Bonito, I'd like to know more about your offer.")}`;
+      return `https://wa.me/${cta.value.replace(/\D/g, "")}?text=${encodeURIComponent("Hi, I'd like to know more about your offer.")}`;
     case "link":
       return cta.value.startsWith("https://") ? cta.value : null;
     default:
