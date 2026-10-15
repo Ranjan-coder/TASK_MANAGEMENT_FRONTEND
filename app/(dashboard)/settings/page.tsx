@@ -358,7 +358,7 @@ export default function SettingsPage() {
 
                   {/* Image URL alternative */}
                   <div>
-                    <label className="block text-[11px] font-medium text-slate-400 mb-1 flex items-center gap-1">
+                    <label className="flex items-center gap-1 text-[11px] font-medium text-slate-400 mb-1">
                       <LinkIcon className="h-3 w-3 text-blue-400" />
                       Or provide an Image URL:
                     </label>

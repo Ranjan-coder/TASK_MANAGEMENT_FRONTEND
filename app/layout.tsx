@@ -3,6 +3,7 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { Providers } from "./providers";
 import { PwaSetup } from "@/components/shared/PwaSetup";
+import { ICONS } from "@/lib/icons";
 
 // The product's name (NEXT_PUBLIC_APP_NAME); each organisation's own name is shown inside the app
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || "Serenx";
@@ -15,10 +16,10 @@ export const metadata: Metadata = {
   // The Serenx logo: the same for every organisation (scripts/genIcons.js makes these)
   icons: {
     icon: [
-      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }
+      { url: ICONS.favicon32, sizes: "32x32", type: "image/png" },
+      { url: ICONS.icon192, sizes: "192x192", type: "image/png" }
     ],
-    apple: "/icons/apple-touch-icon.png"
+    apple: ICONS.appleTouch
   }
 };
 

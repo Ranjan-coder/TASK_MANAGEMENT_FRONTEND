@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
+import { ICONS } from "@/lib/icons";
 
 /**
  * Two different names (module-access-plan.md, Phase 5):
@@ -20,7 +21,7 @@ export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || "Serenx";
  * Icons for the browser, phone home screens and notifications are generated from
  * the same file (scripts/genIcons.js).
  */
-export const PRODUCT_LOGO = "/icons/icon-192.png";
+export const PRODUCT_LOGO = ICONS.icon192;
 
 export function ProductLogo({ className = "h-9 w-9" }: { className?: string }) {
   // eslint-disable-next-line @next/next/no-img-element -- a small static icon; no optimisation needed
