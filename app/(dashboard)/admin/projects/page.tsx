@@ -11,7 +11,8 @@ import { ChatKeysLockedError } from "@/lib/crypto/keyStore";
 import { useAuthStore } from "@/store/authStore";
 import { UserPicker, type PickedUser } from "@/components/admin/UserPicker";
 import { cn } from "@/lib/utils";
-import { stageLabel } from "@/lib/api/projectExtras.api";
+import type { ProjectStage, Timeline } from "@/lib/api/projectExtras.api";
+import { StageControl } from "@/components/projects/StageControl";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = { active: "Active", on_hold: "On hold", completed: "Completed" };
 const STATUS_STYLE: Record<ProjectStatus, string> = {
@@ -52,14 +53,37 @@ const fromProject = (p: AdminProject): FormState => {
 export default function ProjectsAdminPage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<ProjectStatus | "all">("active");
+  const [stageFilter, setStageFilter] = useState<ProjectStage | null>(null);
   const [editing, setEditing] = useState<{ project: AdminProject | null } | null>(null);
   // Leadership and "view projects" holders see the list; only admins set projects up
   const me = useAuthStore((s) => s.user);
   const admin = me?.role === "superadmin" || me?.role === "admin";
+  const status = filter === "all" ? undefined : filter;
+  const listKey = ["admin-projects", filter, stageFilter] as const;
   const { data: projects, isLoading } = useQuery({
-    queryKey: ["admin-projects", filter],
-    queryFn: () => projectsApi.list(filter === "all" ? undefined : filter)
+    queryKey: listKey,
+    queryFn: () => projectsApi.list(status, stageFilter ?? undefined)
   });
+  // Pipeline: projects per stage (one grouped query on the server)
+  const { data: pipeline } = useQuery({
+    queryKey: ["admin-project-stages", filter],
+    queryFn: () => projectsApi.stageCounts(status)
+  });
+  const pipelineTotal = pipeline?.reduce((n, s) => n + s.count, 0) ?? 0;
+
+  // Update the one card in place, then refresh counts (no full list refetch)
+  const applyTimeline = (id: string, t: Timeline) => {
+    queryClient.setQueryData<AdminProject[]>(listKey, (list) =>
+      stageFilter && t.stage !== stageFilter
+        ? list?.filter((p) => p._id !== id) // moved out of the stage being viewed
+        : list?.map((p) => (p._id === id ? { ...p, project: { ...p.project, stage: t.stage, expectedHandover: t.expectedHandover } } : p))
+    );
+    queryClient.invalidateQueries({ queryKey: ["admin-project-stages"] });
+  };
+  const reload = () => {
+    queryClient.invalidateQueries({ queryKey: ["admin-projects"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-project-stages"] });
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -88,6 +112,37 @@ export default function ProjectsAdminPage() {
         ))}
       </div>
 
+      {pipeline && pipelineTotal > 0 && (
+        <section aria-label="Projects by stage" className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-xs font-semibold text-slate-300">Pipeline</h2>
+            {stageFilter && (
+              <button onClick={() => setStageFilter(null)} className="text-[11px] text-violet-300 hover:underline">
+                Show all stages
+              </button>
+            )}
+          </div>
+          <ol className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {pipeline.map((s, i) => (
+              <li key={s.stage}>
+                <button
+                  onClick={() => setStageFilter(stageFilter === s.stage ? null : s.stage)}
+                  aria-pressed={stageFilter === s.stage}
+                  className={cn(
+                    "w-full text-left rounded-xl border px-3 py-2 transition",
+                    stageFilter === s.stage ? "border-violet-500 bg-violet-600/20" : "border-slate-800 hover:border-slate-600",
+                    s.count === 0 && "opacity-50"
+                  )}
+                >
+                  <p className="text-[10px] text-slate-500">{i + 1}. {s.label}</p>
+                  <p className="text-lg font-semibold text-white">{s.count}</p>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       {isLoading ? (
         <div className="h-32 rounded-2xl bg-slate-900 border border-slate-800 animate-pulse" />
       ) : !projects || projects.length === 0 ? (
@@ -112,8 +167,6 @@ export default function ProjectsAdminPage() {
               <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-xs">
                 <dt className="text-slate-500">Customer</dt>
                 <dd className="text-slate-200">{p.project.customers.map((c) => `${c.name}${c.phone ? ` (${c.phone})` : ""}`).join(", ")}</dd>
-                <dt className="text-slate-500">Stage</dt>
-                <dd className="text-slate-200">{stageLabel((p.project as { stage?: string }).stage)}</dd>
                 <dt className="text-slate-500">Lead designer</dt>
                 <dd className="text-slate-200">{p.project.leadDesigner?.name}</dd>
                 {p.project.backupDesigner && (<><dt className="text-slate-500">Backup</dt><dd className="text-slate-200">{p.project.backupDesigner.name}</dd></>)}
@@ -121,6 +174,19 @@ export default function ProjectsAdminPage() {
                 <dt className="text-slate-500">People</dt>
                 <dd className="text-slate-200">{p.members.length}</dd>
               </dl>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                <StageControl
+                  projectId={p._id}
+                  stage={p.project.stage}
+                  status={p.project.status}
+                  expectedHandover={p.project.expectedHandover ?? null}
+                  canEdit={admin}
+                  isAdmin={admin}
+                  compact
+                  onUpdated={(t) => applyTimeline(p._id, t)}
+                  onStale={reload}
+                />
+              </div>
               {admin && (
                 <button onClick={() => setEditing({ project: p })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs hover:border-slate-500">
                   <Pencil className="h-3.5 w-3.5" /> Edit team &amp; status
@@ -137,7 +203,7 @@ export default function ProjectsAdminPage() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            queryClient.invalidateQueries({ queryKey: ["admin-projects"] });
+            reload();
           }}
         />
       )}

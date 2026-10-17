@@ -15,9 +15,17 @@ export const stageLabel = (s?: string) => PROJECT_STAGES.find((x) => x.value ===
 
 export interface Timeline {
   stage: ProjectStage;
-  stageHistory: { stage: ProjectStage; at: string; note: string }[];
+  stageHistory: { stage: ProjectStage; from?: ProjectStage | null; kind?: StageMove | "note" | null; at: string; note: string }[];
   expectedHandover: string | null;
 }
+
+/** Same order and rules as the server (backend config/projectStages.js). */
+export type StageMove = "next" | "back" | "jump";
+const STAGE_INDEX = new Map<string, number>(PROJECT_STAGES.map((s, i) => [s.value, i]));
+export const stageIndex = (s?: string | null) => STAGE_INDEX.get(s ?? "") ?? 0;
+export const nextStageOf = (s?: string | null): ProjectStage | null => PROJECT_STAGES[stageIndex(s) + 1]?.value ?? null;
+export const prevStageOf = (s?: string | null): ProjectStage | null => PROJECT_STAGES[stageIndex(s) - 1]?.value ?? null;
+export const STAGE_MIN_REASON = 5;
 
 export interface MyProject extends Timeline {
   _id: string;
@@ -84,7 +92,8 @@ export interface AdminLead {
 
 export const extrasApi = {
   myProjects: () => apiClient.get<ApiResponse<MyProject[]>>("/projects/mine").then((r) => r.data.data),
-  setStage: (conversationId: string, body: { stage: ProjectStage; note?: string; expectedHandover?: string | null }) =>
+  /** `from` = the stage on screen; the server refuses (409 STAGE_CHANGED) if someone moved it meanwhile. */
+  setStage: (conversationId: string, body: { stage: ProjectStage; from?: ProjectStage; note?: string; expectedHandover?: string | null }) =>
     apiClient.patch<ApiResponse<Timeline & { conversationId: string }>>(`/projects/${conversationId}/stage`, body).then((r) => r.data.data),
 
   approvals: (conversationId: string) =>
