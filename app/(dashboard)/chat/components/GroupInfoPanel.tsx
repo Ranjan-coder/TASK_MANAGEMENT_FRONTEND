@@ -188,7 +188,9 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
         {project && (
           <StageEditor
             conversation={conversation}
-            canEdit={Boolean(user && [project.leadDesigner, project.backupDesigner, project.manager].some((u) => refId(u) === user._id))}
+            // Project team, stage handlers (e.g. a department head) and admins: the server
+            // checks who may do what; customers and read-only roles only look
+            canEdit={Boolean(user && !["customer", "leadership", "marketing"].includes(user.role))}
             onUpdated={(t) => onConversationUpdated?.({ ...conversation, project: { ...project, ...t } })}
           />
         )}

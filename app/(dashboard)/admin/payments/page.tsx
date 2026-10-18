@@ -109,6 +109,7 @@ interface Line {
   title: string;
   amount: string;
   dueDate: string;
+  stageKey: string; // falls due when the project reaches this stage ("" = by date only)
   locked: boolean;
 }
 
@@ -130,7 +131,7 @@ function ScheduleDrawer({ projectId, onClose }: { projectId: string; onClose: ()
       setContract(String(f.contractValuePaise / 100));
       setGst(String(f.gstRatePct));
       setNotes(f.notes);
-      setLines(f.milestones.map((m) => ({ _id: m._id, title: m.title, amount: String(m.amountPaise / 100), dueDate: m.dueDate ? m.dueDate.slice(0, 10) : "", locked: m.status !== "upcoming" })));
+      setLines(f.milestones.map((m) => ({ _id: m._id, title: m.title, amount: String(m.amountPaise / 100), dueDate: m.dueDate ? m.dueDate.slice(0, 10) : "", stageKey: m.stageKey || "", locked: m.status !== "upcoming" })));
     }
   }, [data]);
 
@@ -143,7 +144,7 @@ function ScheduleDrawer({ projectId, onClose }: { projectId: string; onClose: ()
   const total = lines.reduce((a, l) => a + (toPaise(l.amount) || 0), 0);
   const preset = (splits: [string, number][]) => {
     if (!contractPaise) return toast.error("Enter the contract value first");
-    setLines(splits.map(([title, pct]) => ({ title: `${title} (${pct}%)`, amount: String(Math.round((contractPaise * pct) / 100) / 100), dueDate: "", locked: false })));
+    setLines(splits.map(([title, pct]) => ({ title: `${title} (${pct}%)`, amount: String(Math.round((contractPaise * pct) / 100) / 100), dueDate: "", stageKey: "", locked: false })));
   };
 
   const save = useMutation({
@@ -152,7 +153,7 @@ function ScheduleDrawer({ projectId, onClose }: { projectId: string; onClose: ()
         contractValuePaise: contractPaise ?? 0,
         gstRatePct: Number(gst) || 0,
         notes,
-        milestones: lines.map((l) => ({ _id: l._id, title: l.title.trim(), amountPaise: toPaise(l.amount) ?? 0, dueDate: l.dueDate ? new Date(`${l.dueDate}T12:00:00+05:30`).toISOString() : null }))
+        milestones: lines.map((l) => ({ _id: l._id, title: l.title.trim(), amountPaise: toPaise(l.amount) ?? 0, dueDate: l.dueDate ? new Date(`${l.dueDate}T12:00:00+05:30`).toISOString() : null, stageKey: l.stageKey || null }))
       }),
     onSuccess: (res) => {
       toast.success(res.message);
@@ -206,17 +207,21 @@ function ScheduleDrawer({ projectId, onClose }: { projectId: string; onClose: ()
               </div>
               <ul className="space-y-2">
                 {lines.map((l, i) => (
-                  <li key={l._id || i} className="grid grid-cols-[1fr_110px_140px_32px] gap-2 items-center">
+                  <li key={l._id || i} className="grid grid-cols-[1fr_100px_130px_140px_28px] gap-2 items-center">
                     <input value={l.title} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, title: e.target.value.slice(0, 80) } : x)))} className={input} placeholder="Milestone" aria-label="Milestone name" />
                     <input value={l.amount} disabled={l.locked} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} inputMode="decimal" className={cn(input, "disabled:opacity-60")} aria-label="Amount in rupees" title={l.locked ? "This line has a payment, so its amount is locked" : undefined} />
                     <input type="date" value={l.dueDate} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, dueDate: e.target.value } : x)))} className={input} aria-label="Due date" />
+                    <select value={l.stageKey} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, stageKey: e.target.value } : x)))} className={input} aria-label="Due at stage" title="Falls due when the project reaches this stage">
+                      <option value="">Due by date</option>
+                      {(data?.stages || []).map((st) => <option key={st.key} value={st.key}>At {st.name}</option>)}
+                    </select>
                     <button type="button" disabled={l.locked} onClick={() => setLines(lines.filter((_, j) => j !== i))} aria-label="Remove line" className="text-slate-500 hover:text-rose-400 disabled:opacity-30">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </li>
                 ))}
               </ul>
-              <button type="button" onClick={() => setLines([...lines, { title: "", amount: "", dueDate: "", locked: false }])} className="inline-flex items-center gap-1 text-xs text-violet-300 hover:underline">
+              <button type="button" onClick={() => setLines([...lines, { title: "", amount: "", dueDate: "", stageKey: "", locked: false }])} className="inline-flex items-center gap-1 text-xs text-violet-300 hover:underline">
                 <Plus className="h-3.5 w-3.5" /> Add milestone
               </button>
               <p className={cn("text-xs", contractPaise != null && total > contractPaise ? "text-rose-300" : "text-slate-400")}>

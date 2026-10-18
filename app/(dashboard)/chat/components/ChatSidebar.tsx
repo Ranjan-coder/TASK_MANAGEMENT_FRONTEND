@@ -185,19 +185,19 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup, onOpenKe
 
 function getConvLabel(conv: Conversation, myId: string): string {
   if (conv.type === "group") return conv.name || "Unnamed Group";
-  const other = conv.members.find((m) => m.user._id !== myId);
-  return other?.user.name || "Unknown";
+  const other = conv.members.find((m) => m.user && m.user._id !== myId);
+  return other?.user?.name || "Unknown";
 }
 
 function getConvAvatar(conv: Conversation, myId: string) {
   if (conv.type === "group") return conv.avatarUrl || null;
-  const other = conv.members.find((m) => m.user._id !== myId);
+  const other = conv.members.find((m) => m.user && m.user._id !== myId);
   return other?.user.avatarUrl || null;
 }
 
 function getOtherMemberId(conv: Conversation, myId: string): string | null {
   if (conv.type !== "dm") return null;
-  return conv.members.find((m) => m.user._id !== myId)?.user._id || null;
+  return conv.members.find((m) => m.user && m.user._id !== myId)?.user._id || null;
 }
 
 // ── ConvItem component ───────────────────────────────────────────────────────

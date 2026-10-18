@@ -144,6 +144,15 @@
       "staffOnly": true,
       "customerOptIn": true,
       "orgWide": false
+    },
+    {
+      "key": "workflows",
+      "label": "Project workflow",
+      "core": false,
+      "defaultOn": true,
+      "staffOnly": true,
+      "customerOptIn": false,
+      "orgWide": false
     }
   ],
   "pages": [
@@ -214,6 +223,10 @@
     [
       "/receipts",
       "payments"
+    ],
+    [
+      "/workflow",
+      "workflows"
     ],
     [
       "/planner",

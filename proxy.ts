@@ -20,13 +20,14 @@ const PROTECTED_PREFIXES = [
   "/admin",
   "/receipts",
   "/org",
+  "/workflow",
   "/platform",
   "/planner"
 ];
 // The product owner's console, and the only areas that role uses
 const PLATFORM_PREFIXES = ["/platform"];
 const PLATFORM_OWNER_PREFIXES = ["/platform", "/settings", "/notifications"];
-const STAFF_ONLY_PREFIXES = ["/dashboard", "/tasks", "/users", "/audit-logs", "/admin", "/org"];
+const STAFF_ONLY_PREFIXES = ["/dashboard", "/tasks", "/users", "/audit-logs", "/admin", "/org", "/workflow"];
 const CUSTOMER_ONLY_PREFIXES = ["/home"];
 const AUTH_PREFIXES = ["/login", "/signup", "/forgot-password", "/reset-password"];
 
@@ -86,6 +87,7 @@ export const config = {
     "/admin/:path*",
     "/receipts/:path*",
     "/org/:path*",
+    "/workflow/:path*",
     "/platform/:path*",
     "/planner/:path*",
     "/login",

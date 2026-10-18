@@ -1,6 +1,7 @@
 import apiClient from "./client";
 import type { Conversation, WrappedKeyInput } from "@/types/chat";
 import type { ProjectStage } from "./projectExtras.api";
+import type { StaffFlowView } from "./workflow.api";
 
 export type ProjectStatus = "active" | "on_hold" | "completed";
 
@@ -24,6 +25,8 @@ export interface AdminProject extends Omit<Conversation, "project"> {
     stage?: ProjectStage; // missing on older projects = the first stage
     expectedHandover?: string | null;
   };
+  /** The project's place in its company workflow (sent with the admin list) */
+  flowView?: StaffFlowView & { version: number };
 }
 
 export interface StageCount {

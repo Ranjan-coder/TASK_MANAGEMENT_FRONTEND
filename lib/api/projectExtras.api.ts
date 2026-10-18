@@ -28,6 +28,8 @@ export const prevStageOf = (s?: string | null): ProjectStage | null => PROJECT_S
 export const STAGE_MIN_REASON = 5;
 
 export interface MyProject extends Timeline {
+  /** The company's own stages, as the customer sees them (project workflows) */
+  flow?: import("./workflow.api").CustomerFlowView;
   _id: string;
   name: string;
   status: "active" | "on_hold" | "completed";

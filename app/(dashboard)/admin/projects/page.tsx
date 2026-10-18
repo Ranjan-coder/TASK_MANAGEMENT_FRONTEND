@@ -11,8 +11,9 @@ import { ChatKeysLockedError } from "@/lib/crypto/keyStore";
 import { useAuthStore } from "@/store/authStore";
 import { UserPicker, type PickedUser } from "@/components/admin/UserPicker";
 import { cn } from "@/lib/utils";
-import type { ProjectStage, Timeline } from "@/lib/api/projectExtras.api";
-import { StageControl } from "@/components/projects/StageControl";
+import type { ProjectStage } from "@/lib/api/projectExtras.api";
+import type { ProjectFlowResult } from "@/lib/api/workflow.api";
+import { FlowControl } from "@/components/projects/FlowControl";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = { active: "Active", on_hold: "On hold", completed: "Completed" };
 const STATUS_STYLE: Record<ProjectStatus, string> = {
@@ -72,11 +73,11 @@ export default function ProjectsAdminPage() {
   const pipelineTotal = pipeline?.reduce((n, s) => n + s.count, 0) ?? 0;
 
   // Update the one card in place, then refresh counts (no full list refetch)
-  const applyTimeline = (id: string, t: Timeline) => {
+  const applyFlow = (id: string, r: ProjectFlowResult) => {
     queryClient.setQueryData<AdminProject[]>(listKey, (list) =>
-      stageFilter && t.stage !== stageFilter
+      stageFilter && r.stage !== stageFilter
         ? list?.filter((p) => p._id !== id) // moved out of the stage being viewed
-        : list?.map((p) => (p._id === id ? { ...p, project: { ...p.project, stage: t.stage, expectedHandover: t.expectedHandover } } : p))
+        : list?.map((p) => (p._id === id ? { ...p, project: { ...p.project, stage: r.stage as ProjectStage }, flowView: { ...r.flow, version: r.version } } : p))
     );
     queryClient.invalidateQueries({ queryKey: ["admin-project-stages"] });
   };
@@ -175,17 +176,20 @@ export default function ProjectsAdminPage() {
                 <dd className="text-slate-200">{p.members.length}</dd>
               </dl>
               <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                <StageControl
-                  projectId={p._id}
-                  stage={p.project.stage}
-                  status={p.project.status}
-                  expectedHandover={p.project.expectedHandover ?? null}
-                  canEdit={admin}
-                  isAdmin={admin}
-                  compact
-                  onUpdated={(t) => applyTimeline(p._id, t)}
-                  onStale={reload}
-                />
+                {p.flowView && (
+                  <FlowControl
+                    projectId={p._id}
+                    view={p.flowView}
+                    version={p.flowView.version}
+                    status={p.project.status}
+                    expectedHandover={p.project.expectedHandover ?? null}
+                    canEdit={admin}
+                    isAdmin={admin}
+                    compact
+                    onChange={(r) => applyFlow(p._id, r)}
+                    onStale={reload}
+                  />
+                )}
               </div>
               {admin && (
                 <button onClick={() => setEditing({ project: p })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs hover:border-slate-500">

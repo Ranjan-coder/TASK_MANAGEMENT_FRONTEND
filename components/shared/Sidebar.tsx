@@ -28,6 +28,7 @@ import {
   IndianRupee,
   Gift,
   Network,
+  GitBranch,
   Building2,
   Globe,
   CalendarCheck,
@@ -48,10 +49,11 @@ export function Sidebar() {
   const setMobileSidebarOpen = useUIStore((s) => s.setMobileSidebarOpen);
 
   // The product owner's menu: their console and account settings only
-  const PLATFORM_OWNER_NAV = new Set(["/platform", "/platform/structure", "/notifications", "/settings"]);
+  const PLATFORM_OWNER_NAV = new Set(["/platform", "/platform/structure", "/platform/workflows", "/notifications", "/settings"]);
   const navItems = [
     { label: "Organisations", href: "/platform", icon: Globe, roles: ["platform_owner"] },
     { label: "Standard structure", href: "/platform/structure", icon: Network, roles: ["platform_owner"] },
+    { label: "Standard workflows", href: "/platform/workflows", icon: GitBranch, roles: ["platform_owner"] },
     // Customers and marketing have no access to tasks/dashboard (enforced by the API too)
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["superadmin", "admin", "user"] },
     { label: "Tasks", href: "/tasks", icon: CheckSquare, roles: ["superadmin", "admin", "user"] },
@@ -77,6 +79,8 @@ export function Sidebar() {
       roles: ["admin", "superadmin"]
     },
     { label: "Organisation", href: "/admin/organisation", icon: Building2, roles: ["admin", "superadmin"] },
+    // Admins edit it; staff who handle a stage edit that stage (the page shows what they may change)
+    { label: "Project workflow", href: "/workflow", icon: GitBranch, roles: ["admin", "superadmin", "user", "leadership"] },
     // Planner: on by default for staff (menu follows the module: hidden if switched off)
     { label: "Planner", href: "/planner", icon: CalendarCheck },
     { label: "Org chart", href: "/org", icon: Network, roles: ["superadmin", "admin", "marketing", "user", "leadership"] },
