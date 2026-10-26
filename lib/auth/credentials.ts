@@ -11,6 +11,9 @@ import { deriveKeysFromPassword, newKdfParams, type KdfParams } from "@/lib/cryp
 import { establishChatKeys } from "@/lib/crypto/keyBundle";
 import { wipeLocalKeys, setKeyStorageTrusted } from "@/lib/crypto/keyStore";
 import { clearConversationCrypto } from "@/lib/crypto/conversationKeys";
+import { resetChatOutbox } from "@/lib/chat/chatOutbox";
+import { resetDrafts } from "@/lib/chat/drafts";
+import { useChatStore } from "@/store/chatStore";
 
 export interface LoginBody {
   identifier: string;
@@ -89,5 +92,8 @@ export async function finishSignIn(userId: string, wrapKey: CryptoKey): Promise<
 /** Removes chat keys and caches from this browser (sign-out). */
 export async function forgetDeviceKeys(): Promise<void> {
   clearConversationCrypto();
+  resetChatOutbox();
+  resetDrafts();
+  useChatStore.getState().reset();
   await wipeLocalKeys();
 }

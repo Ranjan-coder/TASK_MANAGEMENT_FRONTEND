@@ -3,20 +3,26 @@ import { User } from "@/types";
 // ── Conversation ──────────────────────────────────────────────────────────────
 
 export type ConversationType = "dm" | "group";
+export type NotifyLevel = "all" | "mentions" | "off";
+export type MuteFor = "1h" | "8h" | "1w" | "always" | "none";
 
 export interface ConversationMember {
   user: User;
   role: "admin" | "member";
   joinedAt: string;
   lastRead: string | null;
+  /** Latest message time this member's app received (absent in a customer's view, CH-D3) */
+  lastDelivered?: string | null;
   isOnline?: boolean;
 }
 
 export interface ChatAttachment {
   fileName: string;
   originalName: string;
-  fileType: "pdf" | "doc" | "docx" | "xls" | "xlsx" | "image" | "other";
+  fileType: "pdf" | "doc" | "docx" | "xls" | "xlsx" | "image" | "audio" | "other";
   mimeType: string;
+  /** Voice notes: length in seconds */
+  durationSec?: number;
   fileSize: number;
   url: string;
   publicId: string;
@@ -90,6 +96,25 @@ export interface Message {
   editedAt?: string;
   createdAt: string;
   updatedAt: string;
+  /** Random id given by the sender's app (idempotent retries, matches the live echo) */
+  clientMsgId?: string;
+  /** I saved this message (private to me) */
+  starred?: boolean;
+  /** Shown as "Forwarded" */
+  forwarded?: boolean;
+  /** Threads: the root this reply belongs to; alsoInChat = shown in the chat too */
+  threadRoot?: string | null;
+  alsoInChat?: boolean;
+  /** On a root message */
+  threadReplyCount?: number;
+  threadLastReplyAt?: string;
+  threadParticipants?: string[];
+  /** People the (encrypted) text mentions, as listed by the sender's app */
+  mentions?: string[];
+  mentionsAll?: "everyone" | "here" | null;
+  /** Client-only: set while a message typed here hasn't reached the server */
+  localStatus?: "sending" | "failed";
+  localError?: string;
 }
 
 // ── Conversation ──────────────────────────────────────────────────────────────
@@ -119,6 +144,9 @@ export interface Conversation {
   groupKeyring?: GroupKeyVersion[];
   /** Set for Bonito project chats (managed from Admin → Projects) */
   project?: ProjectInfo;
+  /** Project chats (staff only): the team-notes chat; on that chat, internalFor → the project chat */
+  internalNotes?: string;
+  internalFor?: string;
   /** Project chats: set while an abuse alert is open (drives the warning popup) */
   moderation?: { openIncident?: string | null; warningAt?: string | null };
   /** The current key must be replaced by a staff member of the group */
@@ -128,6 +156,14 @@ export interface Conversation {
   lastActivityAt: string;
   isArchived: boolean;
   unreadCount: number;
+  /** Customers of a project chat: the team's latest read / receive times instead of each person's */
+  teamLastRead?: string | null;
+  teamLastDelivered?: string | null;
+  /** My unread mentions in this chat (my own; never other people's) */
+  mentionCount?: number;
+  /** My notification choice for this chat */
+  notify?: NotifyLevel;
+  mutedUntil?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -198,6 +234,12 @@ export interface SendMessageBody {
   keyRef?: KeyRef;
   franking?: { commitment: string };
   moderation?: { flagged: true; severity: "mild" | "abusive" | "threat"; hitCount: number };
+  clientMsgId?: string;
+  mentions?: string[];
+  mentionsAll?: "everyone" | "here";
+  threadRoot?: string;
+  alsoInChat?: boolean;
+  forwarded?: boolean;
 }
 
 export interface PublicKeyInfo {

@@ -59,6 +59,7 @@ export const NOTIFICATION_ICONS: Record<string, string> = {
   task_status_changed: "🔄",
   comment_added: "💬",
   mentioned: "@",
+  thread_reply: "🧵",
   due_date_reminder: "⏰",
   task_completed: "✅",
   account_created: "👤",

@@ -20,71 +20,56 @@ interface EmojiPickerProps {
   onClose: () => void;
   /** Overrides the popover's position classes. Defaults to anchoring above a bottom input bar (MessageInput's use case). */
   anchorClassName?: string;
+  /** Rendered inside another panel (the message menu): no own position, border or outside-click handling */
+  inline?: boolean;
 }
 
-export function EmojiPicker({ onSelect, onClose, anchorClassName }: EmojiPickerProps) {
+export function EmojiPicker({ onSelect, onClose, anchorClassName, inline = false }: EmojiPickerProps) {
   const [activeCategory, setActiveCategory] = useState(CATEGORY_ICONS[0]);
-  const [search, setSearch] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
+  // Close on outside click (the host panel handles this when inline)
   useEffect(() => {
+    if (inline) return;
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
+  }, [onClose, inline]);
 
-  const searchResults = search.trim()
-    ? Object.values(EMOJI_GROUPS)
-        .flat()
-        .filter(() => true) // search by position (no names without lib)
-        .slice(0, 40)
-    : null;
-
-  const displayEmojis = search.trim()
-    ? Object.values(EMOJI_GROUPS).flat().slice(0, 40)
-    : EMOJI_GROUPS[activeCategory] || [];
+  const displayEmojis = EMOJI_GROUPS[activeCategory] || [];
 
   return (
     <div
       ref={ref}
       className={cn(
-        "absolute z-50 w-[calc(100vw-3rem)] sm:w-72 max-w-[320px] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in duration-150",
-        anchorClassName || "bottom-14 left-2 sm:left-4 slide-in-from-bottom-2"
+        inline
+          ? "w-full"
+          : cn(
+              "absolute z-50 w-[calc(100vw-3rem)] sm:w-72 max-w-[320px] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden",
+              anchorClassName || "bottom-14 left-2 sm:left-4"
+            )
       )}
     >
-      {/* Search */}
-      <div className="px-3 py-2.5 border-b border-slate-800">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search emoji…"
-          autoFocus
-          className="w-full px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
-        />
+      {/* Category tabs (the old search box only ever showed the first 40 emojis, whatever was typed) */}
+      <div role="tablist" aria-label="Emoji categories" className="flex gap-0.5 px-2 pt-2 overflow-x-auto scrollbar-none">
+        {CATEGORY_ICONS.map((cat) => (
+          <button
+            key={cat}
+            role="tab"
+            aria-selected={activeCategory === cat}
+            aria-label={cat.split(" ").slice(1).join(" ")}
+            onClick={() => setActiveCategory(cat)}
+            className={cn(
+              "shrink-0 h-8 w-8 rounded-lg text-base flex items-center justify-center transition",
+              activeCategory === cat ? "bg-violet-600/25 ring-1 ring-violet-500/40" : "hover:bg-slate-800"
+            )}
+          >
+            {cat.split(" ")[0]}
+          </button>
+        ))}
       </div>
-
-      {/* Category tabs */}
-      {!search.trim() && (
-        <div className="flex gap-0.5 px-2 pt-2 overflow-x-auto scrollbar-none">
-          {CATEGORY_ICONS.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={cn(
-                "shrink-0 px-2 py-1 rounded-lg text-xs transition",
-                activeCategory === cat
-                  ? "bg-violet-600/25 text-violet-300 border border-violet-500/30"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-              )}
-            >
-              {cat.split(" ")[0]}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Emoji grid */}
       <div className="p-2 grid grid-cols-8 gap-0.5 max-h-52 overflow-y-auto">
@@ -95,6 +80,7 @@ export function EmojiPicker({ onSelect, onClose, anchorClassName }: EmojiPickerP
               onSelect(emoji);
               onClose();
             }}
+            aria-label={emoji}
             className="h-8 w-8 flex items-center justify-center text-lg rounded-lg hover:bg-slate-700 transition"
           >
             {emoji}

@@ -225,7 +225,13 @@ function CampaignEditor({ id, initial, onClose, onSaved }: { id: string | null; 
       return id ? adminContentApi.updateCampaign(id, body) : adminContentApi.createCampaign(body);
     },
     onSuccess: (c) => {
-      toast.success(c.state === "live" ? "Saved — it's live now" : "Saved");
+      toast.success(
+        c.state === "live"
+          ? "Saved — customers can see it now"
+          : c.status === "draft"
+            ? "Saved as a draft — set Status to Published to show it to customers"
+            : "Saved"
+      );
       onSaved();
     },
     onError: (err) => toast.error(apiErrorMessage(err, "Couldn't save the campaign"))

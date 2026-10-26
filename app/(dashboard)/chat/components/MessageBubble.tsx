@@ -1,14 +1,19 @@
 "use client";
 
+import { toast } from "sonner";
 import { Message, ChatAttachment, KeyRef } from "@/types/chat";
 import { EditCancelledError, type EncryptedText } from "@/lib/crypto/conversationKeys";
 import { cn } from "@/lib/utils";
-import { format, isToday, isYesterday } from "date-fns";
-import { Trash2, Lock, AlertCircle, Reply, Edit2, Check, X, SmilePlus, FileCheck2 } from "lucide-react";
+import { format, formatDistanceToNowStrict, isToday, isYesterday } from "date-fns";
+import { Lock, AlertCircle, Check, CheckCheck, Clock, MessagesSquare, Pin, PinOff, Star, Forward, ChevronDown, Reply, Copy, Info, FileCheck2, Edit2, Trash2 } from "lucide-react";
+import type { Tick } from "@/lib/chat/receipts";
 import { useState, useRef, useEffect } from "react";
 import { FilePreview } from "./FilePreview";
 import { DeleteMessageDialog } from "./DeleteMessageDialog";
-import { EmojiPicker } from "./EmojiPicker";
+import { MessageText } from "./MessageText";
+import { useMessageMenu, type MenuItem } from "@/lib/chat/messageMenu";
+import { useMentions } from "./MentionContext";
+import { encodeMentions, mentionedIn, mentionsToPlain } from "@/lib/chat/mentions";
 
 interface MessageBubbleProps {
   message: Message;
@@ -25,9 +30,29 @@ interface MessageBubbleProps {
   onRequestApproval?: () => void;
   /** Rendered under the attachment, e.g. the design approval card */
   footer?: React.ReactNode;
+  /** A message typed here that the server refused or never got */
+  onRetry?: () => void;
+  onDiscard?: () => void;
+  /** My messages: ✓ sent, ✓✓ delivered, blue ✓✓ seen (lib/chat/receipts.ts) */
+  tick?: Tick;
+  tickTitle?: string;
+  /** Groups: how many have seen it so far (shown until everyone has) */
+  seenBy?: number;
+  /** Staff, own messages in groups: who has seen it */
+  onInfo?: () => void;
+  /** Open this message's thread (reply in thread / "N replies") */
+  onOpenThread?: () => void;
+  /** Pinned in this chat; onTogglePin only for people who may pin */
+  pinned?: boolean;
+  onTogglePin?: () => void;
+  /** Save for later (private ★) */
+  onToggleStar?: () => void;
+  /** Just jumped to: briefly outlined so the eye finds it */
+  highlighted?: boolean;
+  /** Staff: forward to other chats */
+  onForward?: () => void;
 }
 
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
 // "Delete for everyone" is only offered within this window of sending — keep
 // in sync with DELETE_FOR_EVERYONE_WINDOW_MS in the backend's chat.service.js.
@@ -46,32 +71,41 @@ export function MessageBubble({
   onEdit,
   encryptFn,
   onRequestApproval,
-  footer
+  footer,
+  onRetry,
+  onDiscard,
+  tick,
+  tickTitle,
+  seenBy,
+  onInfo,
+  onOpenThread,
+  pinned,
+  onTogglePin,
+  onToggleStar,
+  highlighted,
+  onForward
 }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
-  const [showTouchActions, setShowTouchActions] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showReactionPicker, setShowReactionPicker] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const bubbleContainerRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!showTouchActions) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (bubbleContainerRef.current && !bubbleContainerRef.current.contains(e.target as Node)) {
-        setShowTouchActions(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showTouchActions]);
+  // Is the chat's menu (lib/chat/messageMenu.ts) open for this message? A boolean
+  // selector: opening a menu re-renders only the old and the new message.
+  const menuOpen = useMessageMenu((st) => st.open?.messageId === message._id);
 
   const showAvatar = !isMine && prevMessage?.sender._id !== message.sender._id;
   const showDateSeparator =
     !prevMessage ||
     !isSameDay(new Date(message.createdAt), new Date(prevMessage.createdAt));
+
+  const mentionInfo = useMentions();
+  // Someone else's message that pings me (by name, @everyone or @here)
+  const mentionsMe =
+    !isMine && Boolean(mentionInfo.myId) && (Boolean(message.mentionsAll) || Boolean(message.mentions?.includes(mentionInfo.myId!)));
 
   const timeStr = format(new Date(message.createdAt), "HH:mm");
   const displayText = message.decryptedContent ?? null;
@@ -100,9 +134,57 @@ export function MessageBubble({
     );
   }
 
+  // ── Copy: the text as shown (mentions as "@Name"), decrypted on this device ──
+  const copyText = async () => {
+    const text = mentionsToPlain(displayText || "", mentionInfo.nameOf);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Older browsers / no permission: copy through a temporary, off-screen text box
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      if (!ok) return toast.error("Couldn't copy");
+    }
+    toast.success("Copied");
+  };
+
+  // ── Options menu: the list is built on click, then handed to the one shared menu ──
+  const openMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const r = bubbleRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const items = [
+      onReply && { label: "Reply", icon: Reply, run: onReply },
+      onOpenThread && { label: "Reply in thread", icon: MessagesSquare, run: onOpenThread },
+      displayText && !decryptFailed && { label: "Copy", icon: Copy, run: copyText },
+      onForward && { label: "Forward", icon: Forward, run: onForward },
+      onToggleStar && { label: message.starred ? "Unstar" : "Star", icon: Star, run: onToggleStar, active: message.starred },
+      onTogglePin && { label: pinned ? "Unpin" : "Pin", icon: pinned ? PinOff : Pin, run: onTogglePin },
+      onInfo && { label: "Message info", icon: Info, run: onInfo },
+      onRequestApproval && { label: "Ask for approval", icon: FileCheck2, run: onRequestApproval },
+      isMine && onEdit && !message.attachments?.length && { label: "Edit", icon: Edit2, run: startEdit },
+      onDelete && { label: "Delete", icon: Trash2, run: () => setShowDeleteConfirm(true), danger: true }
+    ].filter(Boolean) as MenuItem[];
+    useMessageMenu.getState().show({
+      messageId: message._id,
+      anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
+      alignRight: isMine,
+      onReact,
+      items
+    });
+  };
+
   // ── Start edit mode ──────────────────────────────────────────────────────
   const startEdit = () => {
-    setEditValue(displayText || "");
+    // Mention tokens are shown as "@Name" while editing and turned back on save
+    setEditValue(mentionsToPlain(displayText || "", mentionInfo.nameOf));
     setEditing(true);
     setTimeout(() => {
       editRef.current?.focus();
@@ -111,8 +193,11 @@ export function MessageBubble({
   };
 
   const saveEdit = async () => {
-    const text = editValue.trim();
-    if (!text || !encryptFn || !onEdit) return;
+    const typed = editValue.trim();
+    if (!typed || !encryptFn || !onEdit) return;
+    // People mentioned before stay mentioned (an edit doesn't notify anyone again)
+    const kept = mentionedIn(displayText || "").map((id) => ({ id, name: mentionInfo.nameOf(id) ?? "" })).filter((p) => p.name);
+    const text = encodeMentions(typed, kept, Boolean(message.mentionsAll)).text;
     setSaving(true);
     try {
       await onEdit(await encryptFn(text));
@@ -142,7 +227,7 @@ export function MessageBubble({
         </div>
       )}
 
-      <div className={cn("group flex items-end gap-2 mb-0.5", isMine && "flex-row-reverse")}>
+      <div className={cn("group/msg relative flex items-end gap-2 mb-0.5", isMine && "flex-row-reverse")}>
         {/* Avatar (others only) */}
         {!isMine && (
           <div className="shrink-0 w-7">
@@ -183,7 +268,7 @@ export function MessageBubble({
                 </p>
                 <p className="text-[11px] text-slate-400 truncate">
                   {typeof message.replyTo === "object"
-                    ? message.replyTo.decryptedContent ||
+                    ? (message.replyTo.decryptedContent && mentionsToPlain(message.replyTo.decryptedContent, mentionInfo.nameOf)) ||
                       message.replyTo.content ||
                       "🔒 Encrypted"
                     : "Message"}
@@ -194,15 +279,45 @@ export function MessageBubble({
 
           {/* Main bubble */}
           <div
-            onClick={() => !editing && setShowTouchActions((v) => !v)}
+            ref={bubbleRef}
             className={cn(
-              "relative px-4 py-2.5 rounded-2xl text-sm leading-relaxed cursor-pointer select-text",
+              "relative px-4 py-2.5 rounded-2xl text-sm leading-relaxed select-text",
               isMine
                 ? "bg-violet-600/25 border border-violet-500/30 text-slate-100 rounded-br-sm"
                 : "bg-slate-800 border border-slate-700/60 text-slate-200 rounded-bl-sm",
+              mentionsMe && "border-amber-400/40 ring-1 ring-amber-400/20",
+              highlighted && "ring-2 ring-sky-400/70 transition-shadow",
               decryptFailed && "border-rose-500/30 bg-rose-500/5"
             )}
           >
+            {/* Options button: shown by CSS on hover / keyboard focus (always on touch screens); opens the chat's one menu */}
+            {!editing && !message.localStatus && (
+              <button
+                type="button"
+                data-menu-trigger={message._id}
+                onClick={openMenu}
+                aria-label="Message options"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                className={cn(
+                  // Just outside the bubble, at its end: never covers the text
+                  "absolute top-1/2 -translate-y-1/2 z-10 h-7 w-7 rounded-full flex items-center justify-center text-slate-300 hover:text-white transition-opacity border border-slate-700",
+                  isMine ? "right-full mr-1.5" : "left-full ml-1.5",
+                  "bg-slate-800 hover:bg-slate-700",
+                  menuOpen
+                    ? "opacity-100"
+                    : "opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-70"
+                )}
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {message.forwarded && (
+              <p className="flex items-center gap-1 text-[10px] italic text-slate-400 mb-1">
+                <Forward className="h-3 w-3" aria-hidden /> Forwarded
+              </p>
+            )}
+
             {/* Attachments */}
             {message.attachments && message.attachments.length > 0 && (
               <div className="mb-2 space-y-2">
@@ -254,19 +369,61 @@ export function MessageBubble({
                 <span className="text-xs">Decrypting…</span>
               </div>
             ) : displayText ? (
-              <span className="whitespace-pre-wrap break-words">{displayText}</span>
+              <MessageText text={displayText} />
             ) : null}
 
             {/* Timestamp row */}
             <div className={cn("flex items-center gap-1.5 mt-1.5", isMine ? "justify-end" : "justify-start")}>
+              {pinned && <Pin className="h-2.5 w-2.5 text-violet-400" aria-label="Pinned" />}
+              {message.starred && <Star className="h-2.5 w-2.5 text-amber-400 fill-amber-400" aria-label="Starred" />}
               {message.isEdited && <span className="text-[10px] text-slate-500 italic">edited</span>}
               {/* The text doesn't match what the sender's app committed to: it can't be reported with proof */}
               {message.type === "text" && message.franking?.commitment && message.frankVerified === false && !message.decryptionFailed && (
                 <span className="text-[10px] text-amber-400" title="This message's proof didn't check out. If it's a problem, report it with a screenshot.">⚠ couldn't verify</span>
               )}
-              <span className="text-[10px] text-slate-500">{timeStr}</span>
-              {isMine && <Lock className="h-2.5 w-2.5 text-emerald-500/70" />}
+              {message.localStatus === "sending" ? (
+                <span className="flex items-center gap-1 text-[10px] text-slate-500" title="Sending — it will go as soon as you're connected">
+                  <Clock className="h-2.5 w-2.5" aria-hidden />
+                  Sending…
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-500">{timeStr}</span>
+              )}
+              {isMine && !message.localStatus && <Lock className="h-2.5 w-2.5 text-emerald-500/70" />}
+              {isMine && !message.localStatus && tick && (
+                <span title={tickTitle} aria-label={tickTitle} className="inline-flex items-center gap-0.5">
+                  {tick === "read" || seenBy ? (
+                    <CheckCheck className="h-3 w-3 text-sky-400" />
+                  ) : tick === "delivered" ? (
+                    <CheckCheck className="h-3 w-3 text-slate-500" />
+                  ) : (
+                    <Check className="h-3 w-3 text-slate-500" />
+                  )}
+                  {/* Groups: some but not all have seen it */}
+                  {tick !== "read" && seenBy ? <span className="text-[10px] text-sky-400 tabular-nums">{seenBy} seen</span> : null}
+                </span>
+              )}
             </div>
+
+            {/* Not sent: say why, and offer to try again or drop it */}
+            {message.localStatus === "failed" && (
+              <div className="flex flex-wrap items-center justify-end gap-2 mt-1.5" onClick={(e) => e.stopPropagation()}>
+                <span className="flex items-center gap-1 text-[10px] text-rose-400" role="alert">
+                  <AlertCircle className="h-3 w-3" aria-hidden />
+                  {message.localError || "Not sent"}
+                </span>
+                {onRetry && (
+                  <button onClick={onRetry} className="text-[10px] font-semibold text-violet-300 hover:text-violet-200 underline-offset-2 hover:underline">
+                    Retry
+                  </button>
+                )}
+                {onDiscard && (
+                  <button onClick={onDiscard} className="text-[10px] font-semibold text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline">
+                    Discard
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Reactions */}
             {message.reactions.length > 0 && (
@@ -288,130 +445,23 @@ export function MessageBubble({
             )}
           </div>
 
-          {/* Actions (desktop hover + mobile touch tap) */}
-          {!editing && (
-            <div
+          {/* Thread summary: "3 replies · 5 min ago" */}
+          {onOpenThread && (message.threadReplyCount || 0) > 0 && (
+            <button
+              onClick={onOpenThread}
               className={cn(
-                "absolute -top-8.5 z-20 flex items-center gap-1 transition-all duration-150 max-w-[calc(100vw-3rem)]",
-                isMine ? "right-0" : "left-0",
-                showTouchActions
-                  ? "opacity-100 pointer-events-auto"
-                  : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+                "mt-1 flex items-center gap-1.5 text-[11px] font-semibold text-violet-300 hover:text-violet-200 hover:underline underline-offset-2",
+                isMine && "ml-auto"
               )}
             >
-              {/* Quick reactions */}
-              <div className="flex items-center gap-0.5 bg-slate-800/95 backdrop-blur-md border border-slate-700 rounded-xl px-1.5 py-0.5 shadow-xl shrink-0">
-                {QUICK_REACTIONS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowTouchActions(false);
-                      onReact?.(emoji);
-                    }}
-                    className="h-6 w-6 rounded-lg flex items-center justify-center text-sm hover:bg-slate-700 transition"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-
-              {/* More reactions — full emoji picker, not just the 6 quick ones */}
-              {onReact && (
-                <div className="relative shrink-0">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowReactionPicker((v) => {
-                        const next = !v;
-                        // Pin the toolbar open (independent of CSS :hover) while the
-                        // picker is open, so moving the mouse toward it doesn't make
-                        // the whole toolbar — and the picker inside it — fade out.
-                        if (next) setShowTouchActions(true);
-                        return next;
-                      });
-                    }}
-                    className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-violet-400 hover:bg-slate-700 transition bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-md shrink-0"
-                    title="More reactions"
-                  >
-                    <SmilePlus className="h-3 w-3" />
-                  </button>
-                  {showReactionPicker && (
-                    <EmojiPicker
-                      onSelect={(emoji) => {
-                        onReact(emoji);
-                        setShowReactionPicker(false);
-                        setShowTouchActions(false);
-                      }}
-                      onClose={() => setShowReactionPicker(false)}
-                      anchorClassName={cn("top-8 z-50", isMine ? "right-0" : "left-0")}
-                    />
-                  )}
-                </div>
+              <MessagesSquare className="h-3 w-3" aria-hidden />
+              {message.threadReplyCount} {message.threadReplyCount === 1 ? "reply" : "replies"}
+              {message.threadLastReplyAt && (
+                <span className="font-normal text-slate-500">· {formatDistanceToNowStrict(new Date(message.threadLastReplyAt))} ago</span>
               )}
-
-              {/* Ask for design approval */}
-              {onRequestApproval && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowTouchActions(false);
-                    onRequestApproval();
-                  }}
-                  className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-300 hover:bg-slate-700 transition bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-md shrink-0"
-                  title="Ask the customer to approve this design"
-                  aria-label="Ask for approval"
-                >
-                  <FileCheck2 className="h-3 w-3" />
-                </button>
-              )}
-
-              {/* Reply */}
-              {onReply && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowTouchActions(false);
-                    onReply();
-                  }}
-                  className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-slate-700 transition bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-md shrink-0"
-                  title="Reply"
-                >
-                  <Reply className="h-3 w-3" />
-                </button>
-              )}
-
-              {/* Edit (own messages only) */}
-              {isMine && onEdit && !message.attachments?.length && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowTouchActions(false);
-                    startEdit();
-                  }}
-                  className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-violet-400 hover:bg-slate-700 transition bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-md shrink-0"
-                  title="Edit message"
-                >
-                  <Edit2 className="h-3 w-3" />
-                </button>
-              )}
-
-              {/* Delete (any message — "delete for me" is always available, "for everyone" only for own messages) */}
-              {onDelete && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowTouchActions(false);
-                    setShowDeleteConfirm(true);
-                  }}
-                  className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-slate-700 transition bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-md shrink-0"
-                  title="Delete message"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              )}
-            </div>
+            </button>
           )}
+
         </div>
       </div>
 

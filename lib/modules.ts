@@ -43,6 +43,18 @@ export function hasModule(user: User | null | undefined, key: ModuleKey): boolea
 }
 
 /**
+ * Does the organisation have this module (whether or not this person was given
+ * it)? For org-wide actions the API allows on the organisation's module alone
+ * (backend moduleRoutes.ORG_WIDE_ROUTES): filing a report, answering one, seeing
+ * your own rating. The list has at most ~16 keys, so a scan is fine.
+ */
+export function orgHasModule(user: User | null | undefined, key: ModuleKey): boolean {
+  if (!user || user.role === "platform_owner") return false;
+  const list = user.organisation?.modules ?? user.modules;
+  return !list || list.includes(key);
+}
+
+/**
  * Screens and the module each belongs to, generated from the backend registry
  * (backend/scripts/genModules.js) and already sorted longest first, so the first
  * prefix that matches is the most specific one.

@@ -2,9 +2,8 @@
 
 import { useState, useRef } from "react";
 import { toast } from "sonner";
-import { encryptFile } from "@/lib/crypto/e2e";
 import type { SendKey } from "@/lib/crypto/conversationKeys";
-import apiClient from "@/lib/api/client";
+import { sendEncryptedFile } from "@/lib/chat/files";
 import { cn } from "@/lib/utils";
 import { FileText, Image as ImageIcon, X, Upload, Lock } from "lucide-react";
 
@@ -14,6 +13,9 @@ interface FileUploadPreviewProps {
   sendKey: SendKey | null;
   onUploaded: () => void;
   onCancel: () => void;
+  /** Sending into a thread */
+  threadRoot?: string;
+  alsoInChat?: boolean;
 }
 
 interface PendingFile {
@@ -22,7 +24,7 @@ interface PendingFile {
   fileType: "image" | "pdf" | "doc" | "docx" | "xls" | "xlsx" | "other";
 }
 
-export function FileUploadPreview({ conversationId, sendKey, onUploaded, onCancel }: FileUploadPreviewProps) {
+export function FileUploadPreview({ conversationId, sendKey, onUploaded, onCancel, threadRoot, alsoInChat }: FileUploadPreviewProps) {
   const [pending, setPending] = useState<PendingFile | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -46,44 +48,27 @@ export function FileUploadPreview({ conversationId, sendKey, onUploaded, onCance
     setProgress(0);
 
     try {
-      // 1. Read file into ArrayBuffer
-      const buffer = await pending.file.arrayBuffer();
-      setProgress(20);
-
-      // 2. Encrypt file bytes client-side
-      const { encryptedBuffer, iv: fileIv } = await encryptFile(buffer, sendKey.key);
-      setProgress(50);
-
-      // 3. Generate a per-file AES key (we use the session key directly; fileIv provides uniqueness)
-      // The encryptedFileKey field will hold the fileIv as a reference (session key is shared)
-      const encryptedFileKey = fileIv; // simplified: fileIv is the unique key material per file
-
-      // 4. Build FormData with encrypted blob
-      const encryptedBlob = new Blob([encryptedBuffer], { type: "application/octet-stream" });
-      const formData = new FormData();
-      formData.append("file", encryptedBlob, pending.file.name + ".enc");
-      formData.append("originalName", pending.file.name);
-      formData.append("mimeType", pending.file.type);
-      formData.append("fileSize", String(pending.file.size));
-      formData.append("fileType", pending.fileType);
-      formData.append("encryptedFileKey", encryptedFileKey);
-      formData.append("fileIv", fileIv);
-      formData.append("keyRef", JSON.stringify(sendKey.keyRef));
-
-      setProgress(70);
-
-      // 5. Upload to backend
-      await apiClient.post(`/chat/conversations/${conversationId}/attachments`, formData, {
-        headers: { "Content-Type": "multipart/form-data" }
+      // Encrypted here, then uploaded (lib/chat/files.ts)
+      await sendEncryptedFile({
+        conversationId,
+        sendKey,
+        data: pending.file,
+        name: pending.file.name,
+        mimeType: pending.file.type || "application/octet-stream",
+        fileType: pending.fileType,
+        threadRoot,
+        alsoInChat,
+        onProgress: setProgress
       });
-      setProgress(100);
 
       if (pending.previewUrl) URL.revokeObjectURL(pending.previewUrl);
       setPending(null);
       onUploaded();
     } catch (err) {
       console.error("Upload error:", err);
-      toast.error("Couldn't upload the file. Please try again.");
+      toast.error(
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Couldn't upload the file. Please try again."
+      );
     } finally {
       setUploading(false);
       setProgress(0);

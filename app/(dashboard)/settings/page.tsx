@@ -27,7 +27,7 @@ import { LeaveStatus } from "@/components/shared/LeaveStatus";
 import { ReportsSection } from "@/components/shared/ReportsSection";
 import { NotificationsSection } from "@/components/shared/NotificationsSection";
 import { PrivacySection } from "@/components/shared/PrivacySection";
-import { hasModule } from "@/lib/modules";
+import { hasModule, orgHasModule } from "@/lib/modules";
 import { prepareCurrentPassword, prepareNewPassword, finishSignIn } from "../../../lib/auth/credentials";
 import { resealBundleForNewPassword, WrongPasswordError } from "../../../lib/crypto/keyBundle";
 import { passwordPolicyError } from "../../../lib/crypto/passwordKeys";
@@ -224,7 +224,8 @@ export default function SettingsPage() {
     { id: "security", label: "Security", icon: Shield },
     { id: "sessions", label: "Devices", icon: Laptop },
     ...(hasModule(user, "chat") ? [{ id: "encryption", label: "Chat Encryption", icon: Key }] : []),
-    ...(user && user.role !== "marketing" && hasModule(user, "reports") ? [{ id: "reports", label: "Reports", icon: Flag }] : []),
+    // Org-wide: anyone who can be reported or file a report needs this tab (not only reviewers)
+    ...(user && user.role !== "marketing" && orgHasModule(user, "reports") ? [{ id: "reports", label: "Reports", icon: Flag }] : []),
     { id: "notifications", label: "Notifications", icon: BellRing },
     { id: "privacy", label: "Privacy & data", icon: ShieldCheck }
   ];

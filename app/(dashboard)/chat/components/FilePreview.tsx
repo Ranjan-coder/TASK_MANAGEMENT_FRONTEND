@@ -5,6 +5,8 @@ import { decryptFile, b64ToBuf } from "@/lib/crypto/e2e";
 import { ChatAttachment } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { FileText, Download, X, ZoomIn, Loader2, Lock } from "lucide-react";
+import { VoiceNote } from "./VoiceNote";
+import { safeDownloadName } from "@/lib/chat/files";
 
 interface FilePreviewProps {
   attachment: ChatAttachment;
@@ -56,7 +58,7 @@ export function FilePreview({ attachment, sessionKey }: FilePreviewProps) {
         // Download non-image files directly
         const a = document.createElement("a");
         a.href = url;
-        a.download = attachment.originalName;
+        a.download = safeDownloadName(attachment); // never the raw name: see lib/chat/files.ts
         a.click();
       }
     } catch {
@@ -65,6 +67,8 @@ export function FilePreview({ attachment, sessionKey }: FilePreviewProps) {
       setDecrypting(false);
     }
   };
+
+  if (attachment.fileType === "audio") return <VoiceNote attachment={attachment} sessionKey={sessionKey} />;
 
   if (isImage) {
     return (
@@ -120,7 +124,7 @@ export function FilePreview({ attachment, sessionKey }: FilePreviewProps) {
                 e.stopPropagation();
                 const a = document.createElement("a");
                 a.href = decryptedUrl;
-                a.download = attachment.originalName;
+                a.download = safeDownloadName(attachment); // never the raw name: see lib/chat/files.ts
                 a.click();
               }}
               className="absolute bottom-4 right-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm transition"

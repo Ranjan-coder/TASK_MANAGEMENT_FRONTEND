@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Flag, X, ShieldCheck, MessageSquareQuote, Star, History } from "lucide-react";
 import { toast } from "sonner";
@@ -35,7 +36,7 @@ export default function ReportsPage() {
   const [direction, setDirection] = useState<ReportDirection | "">("");
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["admin-reports", tab, direction],
     queryFn: async () =>
       (await reportsApi.adminList({ status: tab === "all" ? undefined : tab, direction: direction || undefined })).data.data
@@ -72,8 +73,25 @@ export default function ReportsPage() {
         </select>
       </div>
 
+      {data?.involvedHidden ? (
+        // Why a report the admin knows about isn't in their queue
+        <p className="text-xs text-amber-200 border border-amber-500/30 bg-amber-500/5 rounded-lg px-3 py-2">
+          {data.involvedHidden === 1 ? "1 report here involves you" : `${data.involvedHidden} reports here involve you`} (you filed it or it&apos;s about you),
+          so it isn&apos;t listed — another admin or the superadmin handles it. Reports you filed, with their outcome, are in{" "}
+          <Link href="/settings?section=reports" className="underline hover:text-white">Settings → Reports</Link>.
+        </p>
+      ) : null}
+
       {isLoading ? (
         <p className="text-sm text-slate-400">Loading…</p>
+      ) : isError ? (
+        // A failed request used to look exactly like an empty queue
+        <div className="text-sm text-rose-200 border border-rose-500/30 rounded-xl p-6 text-center space-y-2">
+          <p>{apiErrorMessage(error, "Couldn't load reports.")}</p>
+          <button type="button" onClick={() => refetch()} className="text-xs underline hover:text-white">
+            Try again
+          </button>
+        </div>
       ) : !data?.items.length ? (
         <p className="text-sm text-slate-400 border border-dashed border-slate-800 rounded-xl p-8 text-center">No reports here.</p>
       ) : (

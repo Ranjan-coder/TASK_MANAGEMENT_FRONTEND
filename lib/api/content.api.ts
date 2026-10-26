@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import { uploadInChunks, type ChunkOptions, type VideoTicket } from "@/lib/upload/chunkedUpload";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -138,6 +139,17 @@ export const adminContentApi = {
       })
       .then((r) => r.data.data);
   },
+  /**
+   * Campaign video, in three steps so a broken upload can resume with the same
+   * ticket: signed ticket from our server → pieces straight to Cloudinary
+   * (lib/upload/chunkedUpload.ts) → our server checks what arrived.
+   */
+  videoTicket: (bytes: number) =>
+    apiClient.post<{ data: VideoTicket }>("/admin/media/video-ticket", { bytes }).then((r) => r.data.data),
+  sendVideo: (file: File, ticket: VideoTicket, opts: ChunkOptions = {}) => uploadInChunks(file, ticket, opts),
+  /** `bytes`: the file's size — a different stored size means a piece went missing */
+  finishVideo: (publicId: string, bytes: number) =>
+    apiClient.post<{ data: MediaAsset }>("/admin/media/video-finish", { publicId, bytes }).then((r) => r.data.data),
 
   campaigns: () => apiClient.get<{ data: AdminCampaign[] }>("/admin/campaigns").then((r) => r.data.data),
   createCampaign: (body: CampaignInput) =>

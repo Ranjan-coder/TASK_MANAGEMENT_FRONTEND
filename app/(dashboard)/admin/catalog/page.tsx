@@ -167,16 +167,17 @@ function CatalogEditor({ id, initial, onClose, onSaved }: { id: string | null; i
 
   const save = useMutation({
     mutationFn: () => {
-      const price = priceText.replace(/[^\d]/g, "");
+      // "₹1,50,000" → 150000; "1500.50" → 1501 (whole rupees), not 150050
+      const price = Number.parseFloat(priceText.replace(/[^\d.]/g, ""));
       const body: CatalogInput = {
         ...form,
-        startingPrice: price ? Number(price) : null,
+        startingPrice: Number.isFinite(price) ? Math.round(price) : null,
         features: featuresText.split("\n").map((f) => f.trim()).filter(Boolean).slice(0, 12)
       };
       return id ? adminContentApi.updateCatalogItem(id, body) : adminContentApi.createCatalogItem(body);
     },
-    onSuccess: () => {
-      toast.success("Saved");
+    onSuccess: (i) => {
+      toast.success(i.isPublished ? "Saved — customers can see it" : "Saved as hidden — tick “Show to customers” to publish it");
       onSaved();
     },
     onError: (err) => toast.error(apiErrorMessage(err, "Couldn't save"))
@@ -283,7 +284,7 @@ function CatalogEditor({ id, initial, onClose, onSaved }: { id: string | null; i
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label htmlFor="i-price" className={labelClass}>Starting price (₹) <span className="text-slate-500">(optional)</span></label>
-              <input id="i-price" inputMode="numeric" value={priceText} onChange={(e) => setPriceText(e.target.value)} className={inputClass} placeholder="150000" />
+              <input id="i-price" inputMode="decimal" value={priceText} onChange={(e) => setPriceText(e.target.value)} className={inputClass} placeholder="150000" />
             </div>
             <div>
               <label htmlFor="i-unit" className={labelClass}>Price note</label>
