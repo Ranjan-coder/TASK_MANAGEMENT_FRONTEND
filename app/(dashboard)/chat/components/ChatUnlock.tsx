@@ -35,7 +35,16 @@ export function ChatUnlock({ onUnlocked }: { onUnlocked: () => void }) {
       toast.success("Chats unlocked");
       onUnlocked();
     } catch (err) {
-      setError(err instanceof WrongPasswordError ? "That password is incorrect." : "Couldn't unlock your chats. Please try again.");
+      // Say why when the server told us (a generic message hid a server fault as "wrong password")
+      const serverMessage = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      console.error("Chat unlock failed:", err);
+      setError(
+        err instanceof WrongPasswordError
+          ? "That password is incorrect."
+          : serverMessage
+            ? `Couldn't unlock your chats: ${serverMessage}`
+            : "Couldn't unlock your chats. Check your connection and try again."
+      );
     } finally {
       setBusy(false);
     }

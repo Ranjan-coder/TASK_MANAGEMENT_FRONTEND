@@ -7,8 +7,10 @@ import { useAuthStore } from "@/store/authStore";
 import { Conversation } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Search, Plus, Users, MessageSquare, MessageSquarePlus, Lock, Key, ShieldCheck } from "lucide-react";
+import { Search, Plus, Users, MessageSquare, MessageSquarePlus, Lock, Key, ShieldCheck, AtSign, BellOff, Star } from "lucide-react";
 import { RecoveryBanner } from "./RecoveryKey";
+import { StarredPanel } from "./StarredPanel";
+import { isQuiet } from "./NotifyMenu";
 import { GroupCreateModal } from "./GroupCreateModal";
 import { DirectMessageModal } from "./DirectMessageModal";
 
@@ -35,6 +37,7 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup, onOpenKe
   const [search, setSearch] = useState("");
   const [showDMModal, setShowDMModal] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showStarred, setShowStarred] = useState(false);
 
   const filtered = conversations.filter((c) => {
     const label = getConvLabel(c, user?._id || "");
@@ -73,6 +76,14 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup, onOpenKe
                 className="h-7 w-7 rounded-lg bg-slate-800 hover:bg-violet-600/20 border border-slate-700 hover:border-violet-500/40 flex items-center justify-center transition text-slate-400 hover:text-violet-400"
               >
                 <Key className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setShowStarred(true)}
+                title="Starred messages"
+                aria-label="Starred messages"
+                className="h-7 w-7 rounded-lg bg-slate-800 hover:bg-amber-500/20 border border-slate-700 hover:border-amber-500/40 flex items-center justify-center transition text-slate-400 hover:text-amber-300"
+              >
+                <Star className="h-3.5 w-3.5" />
               </button>
               {canStartChats && (
               <>
@@ -177,6 +188,7 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup, onOpenKe
 
       {showDMModal && <DirectMessageModal onClose={() => setShowDMModal(false)} />}
       {showGroupModal && <GroupCreateModal onClose={() => setShowGroupModal(false)} />}
+      {showStarred && <StarredPanel onClose={() => setShowStarred(false)} />}
     </>
   );
 }
@@ -185,19 +197,19 @@ export function ChatSidebar({ className, needsKeySetup, onOpenKeySetup, onOpenKe
 
 function getConvLabel(conv: Conversation, myId: string): string {
   if (conv.type === "group") return conv.name || "Unnamed Group";
-  const other = conv.members.find((m) => m.user._id !== myId);
-  return other?.user.name || "Unknown";
+  const other = conv.members.find((m) => m.user && m.user._id !== myId);
+  return other?.user?.name || "Unknown";
 }
 
 function getConvAvatar(conv: Conversation, myId: string) {
   if (conv.type === "group") return conv.avatarUrl || null;
-  const other = conv.members.find((m) => m.user._id !== myId);
+  const other = conv.members.find((m) => m.user && m.user._id !== myId);
   return other?.user.avatarUrl || null;
 }
 
 function getOtherMemberId(conv: Conversation, myId: string): string | null {
   if (conv.type !== "dm") return null;
-  return conv.members.find((m) => m.user._id !== myId)?.user._id || null;
+  return conv.members.find((m) => m.user && m.user._id !== myId)?.user._id || null;
 }
 
 // ── ConvItem component ───────────────────────────────────────────────────────
@@ -216,6 +228,7 @@ function ConvItem({ conv, userId, isActive, onlineUsers, onClick }: ConvItemProp
   const otherId = getOtherMemberId(conv, userId);
   const isOnline = otherId ? onlineUsers.has(otherId) : false;
   const hasUnread = conv.unreadCount > 0;
+  const quiet = isQuiet(conv);
 
   const preview = conv.lastMessage
     ? conv.lastMessage.isDeleted
@@ -289,11 +302,28 @@ function ConvItem({ conv, userId, isActive, onlineUsers, onClick }: ConvItemProp
         </div>
         <div className="flex items-center justify-between gap-1 mt-0.5">
           <span className="text-xs text-slate-500 truncate">{preview}</span>
-          {hasUnread && (
-            <span className="shrink-0 h-5 min-w-5 px-1 rounded-full bg-violet-600 text-white text-[10px] font-bold flex items-center justify-center">
-              {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
-            </span>
-          )}
+          <span className="flex items-center gap-1 shrink-0">
+            {quiet && <BellOff className="h-3 w-3 text-slate-500" aria-label="Notifications off" />}
+            {/* Someone @mentioned me: stands out even in a muted chat */}
+            {(conv.mentionCount || 0) > 0 && (
+              <span
+                className="h-5 min-w-5 px-1 rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold flex items-center justify-center"
+                aria-label={`${conv.mentionCount} unread mentions`}
+              >
+                <AtSign className="h-3 w-3" />
+              </span>
+            )}
+            {hasUnread && (
+              <span
+                className={cn(
+                  "h-5 min-w-5 px-1 rounded-full text-white text-[10px] font-bold flex items-center justify-center",
+                  quiet ? "bg-slate-600" : "bg-violet-600"
+                )}
+              >
+                {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
+              </span>
+            )}
+          </span>
         </div>
       </div>
     </button>

@@ -1,4 +1,6 @@
 import { apiClient } from "@/lib/api/client";
+import { hasModule } from "@/lib/modules";
+import { useAuthStore } from "@/store/authStore";
 import { scanText, type ScanResult, type Severity } from "./normalize";
 
 /**
@@ -27,6 +29,8 @@ const readStored = (): Lexicon | null => {
 };
 
 export async function loadLexicon(): Promise<Lexicon | null> {
+  // No moderation module: no word list, so messages are never flagged
+  if (!hasModule(useAuthStore.getState().user, "moderation")) return null;
   if (current && Date.now() - fetchedAt < REFRESH_MS) return current;
   if (inflight) return inflight;
   current = current || readStored();

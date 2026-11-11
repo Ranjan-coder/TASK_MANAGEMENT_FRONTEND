@@ -8,11 +8,11 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
           role="note"
           className="rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 p-3 text-xs"
         >
-          Draft for development. Replace with the final text approved by Bonito&apos;s legal advisor before launch.
+          Draft for development. Replace with the final text approved by your legal advisor before launch.
         </div>
         {children}
         <p className="pt-6">
-          <Link href="/signup" className="text-violet-400 hover:text-violet-300">Back to sign up</Link>
+          <Link href="/login" className="text-violet-400 hover:text-violet-300">Back to sign in</Link>
         </p>
       </article>
     </div>

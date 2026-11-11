@@ -144,7 +144,16 @@ export const reportsApi = {
   respond: (id: string, text: string) => apiClient.post(`/reports/${id}/response`, { text }),
 
   adminList: (params: { status?: ReportStatus; direction?: ReportDirection; page?: number }) =>
-    apiClient.get<ApiResponse<{ items: AdminReportSummary[]; total: number; page: number; counts: Partial<Record<ReportStatus, number>> }>>(
+    apiClient.get<
+      ApiResponse<{
+        items: AdminReportSummary[];
+        total: number;
+        page: number;
+        counts: Partial<Record<ReportStatus, number>>;
+        /** Reports in this view that involve the viewer (they filed it / it's about them): not listed */
+        involvedHidden?: number;
+      }>
+    >(
       "/admin/reports",
       { params }
     ),

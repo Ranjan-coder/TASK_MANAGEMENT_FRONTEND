@@ -7,7 +7,9 @@ import {
   CreateGroupBody,
   SendMessageBody,
   KeyRef,
-  WrappedKeyInput
+  WrappedKeyInput,
+  NotifyLevel,
+  MuteFor
 } from "@/types/chat";
 import { ApiResponse } from "@/types";
 
@@ -69,6 +71,12 @@ export const fetchConversation = (id: string) =>
 export const updateConversation = (id: string, data: { name?: string; avatarUrl?: string }) =>
   chatAxios.patch<ApiResponse<Conversation>>(`/conversations/${id}`, data).then((r) => r.data.data);
 
+/** My notification choice for a chat (private to me). */
+export const updateNotify = (id: string, body: { notify?: NotifyLevel; muteFor?: MuteFor }) =>
+  chatAxios
+    .patch<ApiResponse<{ mentionCount: number; notify: NotifyLevel; mutedUntil: string | null }>>(`/conversations/${id}/notify`, body)
+    .then((r) => r.data.data);
+
 // ── Group Member Management ───────────────────────────────────────────────────
 
 export const addMember = (convId: string, userId: string) =>
@@ -107,6 +115,107 @@ export const fetchMessages = (convId: string, cursor?: string, limit = 30) =>
     >(`/conversations/${convId}/messages`, { params: { cursor, limit } })
     .then((r) => r.data.data);
 
+/** Jump to a message: it and up to limit/2 either side. A thread reply returns only its threadRoot. */
+export const fetchMessagesAround = (convId: string, messageId: string, limit = 40) =>
+  chatAxios
+    .get<
+      ApiResponse<{
+        messages: Message[];
+        hasMore: boolean;
+        nextCursor: string | null;
+        hasNewer: boolean;
+        newerCursor: string | null;
+        threadRoot?: string;
+      }>
+    >(`/conversations/${convId}/messages`, { params: { around: messageId, limit } })
+    .then((r) => r.data.data);
+
+/** The page after a message (scrolling down after a jump). */
+export const fetchMessagesAfter = (convId: string, afterId: string, limit = 30) =>
+  chatAxios
+    .get<ApiResponse<{ messages: Message[]; hasNewer: boolean; newerCursor: string | null }>>(`/conversations/${convId}/messages`, {
+      params: { after: afterId, limit }
+    })
+    .then((r) => r.data.data);
+
+// ── Pins (the chat's) and stars (mine) ───────────────────────────────────────
+
+export interface PinnedItem {
+  by: string;
+  at: string;
+  message: Message;
+}
+
+export const fetchPins = (convId: string) =>
+  chatAxios.get<ApiResponse<{ pins: PinnedItem[]; canPin: boolean }>>(`/conversations/${convId}/pins`).then((r) => r.data.data);
+
+export const pinMessage = (convId: string, messageId: string) => chatAxios.post(`/conversations/${convId}/pins/${messageId}`).then((r) => r.data);
+
+export const unpinMessage = (convId: string, messageId: string) =>
+  chatAxios.delete(`/conversations/${convId}/pins/${messageId}`).then((r) => r.data);
+
+export const starMessage = (messageId: string) => chatAxios.post(`/messages/${messageId}/star`).then((r) => r.data);
+
+export const unstarMessage = (messageId: string) => chatAxios.delete(`/messages/${messageId}/star`).then((r) => r.data);
+
+export const fetchStarred = (cursor?: string) =>
+  chatAxios
+    .get<ApiResponse<{ items: { starredAt: string; message: Message }[]; next: string | null }>>("/starred", { params: { cursor } })
+    .then((r) => r.data.data);
+
+// ── Customer experience (P4) ─────────────────────────────────────────────────
+
+export interface ServiceInfo {
+  project: boolean;
+  openNow?: boolean;
+  hours?: string;
+  backAt?: string | null;
+  typicalReplyMinutes?: number | null;
+}
+
+export const fetchServiceInfo = (convId: string) =>
+  chatAxios.get<ApiResponse<ServiceInfo>>(`/conversations/${convId}/service-info`).then((r) => r.data.data);
+
+/** Opens (or starts, with keys wrapped for the project's staff) the team-notes chat. */
+export const openTeamNotes = (convId: string, encryptedGroupKeys?: Record<string, WrappedKeyInput>) =>
+  chatAxios
+    .post<ApiResponse<{ conversationId: string; created: boolean }>>(`/conversations/${convId}/team-notes`, encryptedGroupKeys ? { encryptedGroupKeys } : {})
+    .then((r) => r.data.data);
+
+export const fetchFiles = (convId: string, kind: "image" | "doc" | "audio", cursor?: string) =>
+  chatAxios
+    .get<ApiResponse<{ messages: Message[]; next: string | null }>>(`/conversations/${convId}/files`, { params: { kind, cursor } })
+    .then((r) => r.data.data);
+
+export interface ScheduledItem {
+  _id: string;
+  conversation: string;
+  sendAt: string;
+  status: string;
+  ciphertext: string;
+  iv: string;
+  keyRef?: KeyRef;
+  threadRoot?: string | null;
+  createdAt: string;
+}
+
+export const scheduleMessage = (convId: string, body: SendMessageBody & { sendAt: string }) =>
+  chatAxios.post<ApiResponse<ScheduledItem>>(`/conversations/${convId}/scheduled`, body).then((r) => r.data.data);
+
+export const fetchScheduled = (convId: string) =>
+  chatAxios.get<ApiResponse<ScheduledItem[]>>(`/conversations/${convId}/scheduled`).then((r) => r.data.data);
+
+export const cancelScheduled = (id: string) => chatAxios.delete(`/scheduled/${id}`).then((r) => r.data);
+
+/** A thread's root and one page of replies (cursor pages back in time). */
+export const fetchThread = (convId: string, rootId: string, cursor?: string, limit = 30) =>
+  chatAxios
+    .get<ApiResponse<{ root: Message; messages: Message[]; hasMore: boolean; nextCursor: string | null }>>(
+      `/conversations/${convId}/threads/${rootId}`,
+      { params: { cursor, limit } }
+    )
+    .then((r) => r.data.data);
+
 export const sendMessage = (convId: string, body: SendMessageBody) =>
   chatAxios
     .post<ApiResponse<Message>>(`/conversations/${convId}/messages`, body)
@@ -129,3 +238,22 @@ export const editMessage = (
 
 export const deleteMessage = (messageId: string, scope: "me" | "everyone" = "everyone") =>
   chatAxios.delete(`/messages/${messageId}`, { data: { scope } }).then((r) => r.data);
+
+// ── People (staff directory) ─────────────────────────────────────────────────
+
+/** A colleague who can be added to a chat (no email or phone: pickers don't need them). */
+export interface DirectoryPerson {
+  _id: string;
+  name: string;
+  avatarUrl: string;
+  designation: string;
+  role: string;
+  publicKey: string | null;
+  keyVersion: number;
+}
+
+/** Active staff of my organisation who have chat, in name order; `next` pages on. */
+export const fetchChatPeople = (search: string, cursor?: string) =>
+  chatAxios
+    .get<ApiResponse<{ people: DirectoryPerson[]; next: string | null }>>("/people", { params: { search: search || undefined, cursor } })
+    .then((r) => r.data.data);

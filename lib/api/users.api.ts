@@ -1,3 +1,4 @@
+import type { OrgRole } from "@/types";
 import apiClient from "./client";
 
 export interface UserFilters {
@@ -16,10 +17,11 @@ export interface CreateUserPayload {
   name: string;
   email: string;
   password: string;
-  role?: "superadmin" | "admin" | "marketing" | "user" | "leadership" | "customer";
+  role?: OrgRole;
   departmentId?: string | null;
   designationId?: string | null;
   reportsTo?: string | null;
+  referralCode?: string; // customers only
 }
 
 export interface UpdateUserPayload {
@@ -42,10 +44,11 @@ export const usersApi = {
    * The initial password never reaches the server: it's converted to an authKey
    * in the admin's browser. The new user must change it at first sign-in.
    */
-  createUser: async ({ password, ...rest }: CreateUserPayload) => {
+  createUser: async ({ password, referralCode, ...rest }: CreateUserPayload) => {
     const { prepareNewPassword } = await import("@/lib/auth/credentials");
     const { authKey, kdfSalt } = await prepareNewPassword(password);
-    return apiClient.post("/users", { ...rest, authKey, kdfSalt });
+    const referral = rest.role === "customer" && referralCode ? { referralCode } : {};
+    return apiClient.post("/users", { ...rest, ...referral, authKey, kdfSalt });
   },
 
   updateUser: (id: string, data: UpdateUserPayload) =>

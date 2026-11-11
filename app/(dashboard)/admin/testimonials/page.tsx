@@ -9,6 +9,8 @@ import { adminContentApi } from "@/lib/api/content.api";
 import { apiErrorMessage } from "@/lib/api/customerAuth.api";
 import { MediaUploader } from "@/components/admin/MediaUploader";
 import { cn } from "@/lib/utils";
+import { OrgName } from "@/lib/brand";
+
 
 const input = "w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500";
 const label = "block text-xs font-medium text-slate-300 mb-1";
@@ -186,7 +188,7 @@ function Editor({ id, initial, onClose }: { id: string | null; initial: Form; on
           </div>
           <label className="flex items-start gap-2 text-sm text-slate-200">
             <input type="checkbox" checked={form.consentConfirmed} onChange={(e) => set("consentConfirmed", e.target.checked)} className="mt-1 accent-violet-500" required />
-            The customer agreed to Bonito showing this quote{form.photo ? " and photo" : ""} to other customers.
+            The customer agreed to <OrgName /> showing this quote{form.photo ? " and photo" : ""} to other customers.
           </label>
           <label className="flex items-center gap-2 text-sm text-slate-200">
             <input type="checkbox" checked={form.isPublished} onChange={(e) => set("isPublished", e.target.checked)} className="accent-violet-500" />

@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, X, FolderKanban, Lock } from "lucide-react";
+import { Plus, Pencil, X, FolderKanban, Lock, Contact } from "lucide-react";
+import { contactsApi } from "@/lib/api/contacts.api";
+import { ContactsEditor } from "@/components/projects/ContactsEditor";
 import { toast } from "sonner";
 import { projectsApi, type AdminProject, type ProjectStatus, type PersonRef } from "@/lib/api/projects.api";
 import { apiErrorMessage } from "@/lib/api/customerAuth.api";
@@ -11,7 +13,9 @@ import { ChatKeysLockedError } from "@/lib/crypto/keyStore";
 import { useAuthStore } from "@/store/authStore";
 import { UserPicker, type PickedUser } from "@/components/admin/UserPicker";
 import { cn } from "@/lib/utils";
-import { stageLabel } from "@/lib/api/projectExtras.api";
+import type { ProjectStage } from "@/lib/api/projectExtras.api";
+import type { ProjectFlowResult } from "@/lib/api/workflow.api";
+import { FlowControl } from "@/components/projects/FlowControl";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = { active: "Active", on_hold: "On hold", completed: "Completed" };
 const STATUS_STYLE: Record<ProjectStatus, string> = {
@@ -49,17 +53,71 @@ const fromProject = (p: AdminProject): FormState => {
   };
 };
 
+/**
+ * Company-wide contacts (project-contacts-plan.md P2), e.g. one payments contact
+ * for every project. A project's own contacts (chat → Group info) replace these
+ * topic by topic.
+ */
+function CompanyContactsButton() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const { data, refetch, isFetching } = useQuery({ queryKey: ["company-contacts"], queryFn: contactsApi.company, enabled: open });
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-700 text-slate-200 hover:bg-slate-800 text-sm font-semibold">
+        <Contact className="h-4 w-4" /> Default contacts
+      </button>
+      {open && !data && isFetching && <span className="text-xs text-slate-400 self-center">Loading…</span>}
+      {open && data && (
+        <ContactsEditor
+          title="Default contacts for every project"
+          intro="Customers see these in each project's chat and on their Home page. The lead designer and project manager are listed automatically; a project's own contacts (chat → Group info → Edit) replace these topic by topic."
+          initial={data.contacts}
+          rev={data.rev}
+          loadCandidates={contactsApi.companyCandidates}
+          onSave={async (contacts, rev) => qc.setQueryData(["company-contacts"], await contactsApi.saveCompany(contacts, rev))}
+          onConflict={() => refetch()}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
 export default function ProjectsAdminPage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<ProjectStatus | "all">("active");
+  const [stageFilter, setStageFilter] = useState<ProjectStage | null>(null);
   const [editing, setEditing] = useState<{ project: AdminProject | null } | null>(null);
   // Leadership and "view projects" holders see the list; only admins set projects up
   const me = useAuthStore((s) => s.user);
   const admin = me?.role === "superadmin" || me?.role === "admin";
+  const status = filter === "all" ? undefined : filter;
+  const listKey = ["admin-projects", filter, stageFilter] as const;
   const { data: projects, isLoading } = useQuery({
-    queryKey: ["admin-projects", filter],
-    queryFn: () => projectsApi.list(filter === "all" ? undefined : filter)
+    queryKey: listKey,
+    queryFn: () => projectsApi.list(status, stageFilter ?? undefined)
   });
+  // Pipeline: projects per stage (one grouped query on the server)
+  const { data: pipeline } = useQuery({
+    queryKey: ["admin-project-stages", filter],
+    queryFn: () => projectsApi.stageCounts(status)
+  });
+  const pipelineTotal = pipeline?.reduce((n, s) => n + s.count, 0) ?? 0;
+
+  // Update the one card in place, then refresh counts (no full list refetch)
+  const applyFlow = (id: string, r: ProjectFlowResult) => {
+    queryClient.setQueryData<AdminProject[]>(listKey, (list) =>
+      stageFilter && r.stage !== stageFilter
+        ? list?.filter((p) => p._id !== id) // moved out of the stage being viewed
+        : list?.map((p) => (p._id === id ? { ...p, project: { ...p.project, stage: r.stage as ProjectStage }, flowView: { ...r.flow, version: r.version } } : p))
+    );
+    queryClient.invalidateQueries({ queryKey: ["admin-project-stages"] });
+  };
+  const reload = () => {
+    queryClient.invalidateQueries({ queryKey: ["admin-projects"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-project-stages"] });
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -69,9 +127,12 @@ export default function ProjectsAdminPage() {
           <p className="text-sm text-slate-400">Each project is a private chat between the customer and their design team.</p>
         </div>
         {admin && (
-          <button onClick={() => setEditing({ project: null })} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold">
-            <Plus className="h-4 w-4" /> New project
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <CompanyContactsButton />
+            <button onClick={() => setEditing({ project: null })} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold">
+              <Plus className="h-4 w-4" /> New project
+            </button>
+          </div>
         )}
       </div>
 
@@ -87,6 +148,37 @@ export default function ProjectsAdminPage() {
           </button>
         ))}
       </div>
+
+      {pipeline && pipelineTotal > 0 && (
+        <section aria-label="Projects by stage" className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-xs font-semibold text-slate-300">Pipeline</h2>
+            {stageFilter && (
+              <button onClick={() => setStageFilter(null)} className="text-[11px] text-violet-300 hover:underline">
+                Show all stages
+              </button>
+            )}
+          </div>
+          <ol className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {pipeline.map((s, i) => (
+              <li key={s.stage}>
+                <button
+                  onClick={() => setStageFilter(stageFilter === s.stage ? null : s.stage)}
+                  aria-pressed={stageFilter === s.stage}
+                  className={cn(
+                    "w-full text-left rounded-xl border px-3 py-2 transition",
+                    stageFilter === s.stage ? "border-violet-500 bg-violet-600/20" : "border-slate-800 hover:border-slate-600",
+                    s.count === 0 && "opacity-50"
+                  )}
+                >
+                  <p className="text-[10px] text-slate-500">{i + 1}. {s.label}</p>
+                  <p className="text-lg font-semibold text-white">{s.count}</p>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       {isLoading ? (
         <div className="h-32 rounded-2xl bg-slate-900 border border-slate-800 animate-pulse" />
@@ -112,8 +204,6 @@ export default function ProjectsAdminPage() {
               <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-xs">
                 <dt className="text-slate-500">Customer</dt>
                 <dd className="text-slate-200">{p.project.customers.map((c) => `${c.name}${c.phone ? ` (${c.phone})` : ""}`).join(", ")}</dd>
-                <dt className="text-slate-500">Stage</dt>
-                <dd className="text-slate-200">{stageLabel((p.project as { stage?: string }).stage)}</dd>
                 <dt className="text-slate-500">Lead designer</dt>
                 <dd className="text-slate-200">{p.project.leadDesigner?.name}</dd>
                 {p.project.backupDesigner && (<><dt className="text-slate-500">Backup</dt><dd className="text-slate-200">{p.project.backupDesigner.name}</dd></>)}
@@ -121,6 +211,22 @@ export default function ProjectsAdminPage() {
                 <dt className="text-slate-500">People</dt>
                 <dd className="text-slate-200">{p.members.length}</dd>
               </dl>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                {p.flowView && (
+                  <FlowControl
+                    projectId={p._id}
+                    view={p.flowView}
+                    version={p.flowView.version}
+                    status={p.project.status}
+                    expectedHandover={p.project.expectedHandover ?? null}
+                    canEdit={admin}
+                    isAdmin={admin}
+                    compact
+                    onChange={(r) => applyFlow(p._id, r)}
+                    onStale={reload}
+                  />
+                )}
+              </div>
               {admin && (
                 <button onClick={() => setEditing({ project: p })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs hover:border-slate-500">
                   <Pencil className="h-3.5 w-3.5" /> Edit team &amp; status
@@ -137,7 +243,7 @@ export default function ProjectsAdminPage() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            queryClient.invalidateQueries({ queryKey: ["admin-projects"] });
+            reload();
           }}
         />
       )}

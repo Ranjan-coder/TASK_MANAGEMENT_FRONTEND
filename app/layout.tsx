@@ -3,13 +3,24 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { Providers } from "./providers";
 import { PwaSetup } from "@/components/shared/PwaSetup";
+import { ICONS } from "@/lib/icons";
+
+// The product's name (NEXT_PUBLIC_APP_NAME); each organisation's own name is shown inside the app
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || "Serenx";
 
 export const metadata: Metadata = {
-  title: "Bonito Designs",
+  title: APP_NAME,
   description: "Your interior design projects, offers and designer chat.",
-  applicationName: "Bonito",
-  appleWebApp: { capable: true, title: "Bonito", statusBarStyle: "black-translucent" },
-  icons: { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" }
+  applicationName: APP_NAME,
+  appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "black-translucent" },
+  // The Serenx logo: the same for every organisation (scripts/genIcons.js makes these)
+  icons: {
+    icon: [
+      { url: ICONS.favicon32, sizes: "32x32", type: "image/png" },
+      { url: ICONS.icon192, sizes: "192x192", type: "image/png" }
+    ],
+    apple: ICONS.appleTouch
+  }
 };
 
 export const viewport: Viewport = {

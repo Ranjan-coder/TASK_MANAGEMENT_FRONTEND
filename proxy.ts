@@ -19,9 +19,15 @@ const PROTECTED_PREFIXES = [
   "/home",
   "/admin",
   "/receipts",
-  "/org"
+  "/org",
+  "/workflow",
+  "/platform",
+  "/planner"
 ];
-const STAFF_ONLY_PREFIXES = ["/dashboard", "/tasks", "/users", "/audit-logs", "/admin", "/org"];
+// The product owner's console, and the only areas that role uses
+const PLATFORM_PREFIXES = ["/platform"];
+const PLATFORM_OWNER_PREFIXES = ["/platform", "/settings", "/notifications"];
+const STAFF_ONLY_PREFIXES = ["/dashboard", "/tasks", "/users", "/audit-logs", "/admin", "/org", "/workflow"];
 const CUSTOMER_ONLY_PREFIXES = ["/home"];
 const AUTH_PREFIXES = ["/login", "/signup", "/forgot-password", "/reset-password"];
 
@@ -32,7 +38,8 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const signedIn = Boolean(request.cookies.get("accessToken")?.value || request.cookies.get("refreshToken")?.value);
   const role = request.cookies.get("role")?.value;
-  const home = role === "customer" ? "/home" : role === "leadership" ? "/admin/overview" : "/dashboard";
+  const home =
+    role === "platform_owner" ? "/platform" : role === "customer" ? "/home" : role === "leadership" ? "/admin/overview" : "/dashboard";
 
   if (pathname === "/") {
     return NextResponse.redirect(new URL(signedIn ? home : "/login", request.url));
@@ -45,6 +52,12 @@ export function proxy(request: NextRequest) {
   }
 
   if (signedIn && role) {
+    if (role === "platform_owner" && startsWithAny(pathname, PROTECTED_PREFIXES) && !startsWithAny(pathname, PLATFORM_OWNER_PREFIXES)) {
+      return NextResponse.redirect(new URL("/platform", request.url));
+    }
+    if (role !== "platform_owner" && startsWithAny(pathname, PLATFORM_PREFIXES)) {
+      return NextResponse.redirect(new URL(home, request.url));
+    }
     if (role === "customer" && startsWithAny(pathname, STAFF_ONLY_PREFIXES)) {
       return NextResponse.redirect(new URL("/home", request.url));
     }
@@ -74,6 +87,9 @@ export const config = {
     "/admin/:path*",
     "/receipts/:path*",
     "/org/:path*",
+    "/workflow/:path*",
+    "/platform/:path*",
+    "/planner/:path*",
     "/login",
     "/signup",
     "/forgot-password",

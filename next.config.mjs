@@ -28,8 +28,9 @@ const csp = [
   "img-src 'self' data: blob: https://res.cloudinary.com https://api.cloudinary.com",
   "media-src 'self' blob: https://res.cloudinary.com",
   "font-src 'self' data:",
-  // API + live connection; encrypted chat files are downloaded from Cloudinary and decrypted in the browser
-  `connect-src 'self' ${API_ORIGIN} ${SOCKET_ORIGIN} ${SOCKET_WS} https://res.cloudinary.com${isDev ? " ws://localhost:* http://localhost:*" : ""}`,
+  // API + live connection; encrypted chat files are downloaded from Cloudinary and decrypted in the browser;
+  // api.cloudinary.com: campaign videos uploaded in signed pieces (lib/upload/chunkedUpload.ts)
+  `connect-src 'self' ${API_ORIGIN} ${SOCKET_ORIGIN} ${SOCKET_WS} https://res.cloudinary.com https://api.cloudinary.com${isDev ? " ws://localhost:* http://localhost:*" : ""}`,
   "worker-src 'self'",
   "manifest-src 'self'",
   "frame-src 'none'",
@@ -45,7 +46,9 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
+  // microphone=(self): chat voice notes record on our own pages (it was "()", which blocked them
+  // in every browser); still never for embedded third-party frames
+  { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=(), payment=(), usb=()" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   ...(!httpsOnly ? [] : [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }])
 ];

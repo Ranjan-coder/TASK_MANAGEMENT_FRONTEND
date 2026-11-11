@@ -5,6 +5,8 @@ import Link from "next/link";
 import { BellRing, X } from "lucide-react";
 import { toast } from "sonner";
 import { currentPushSubscription, enablePush, isIos, isStandalone, pushSupported } from "@/lib/pwa";
+import { APP_NAME } from "@/lib/brand";
+
 
 const DISMISS_KEY = "bonito:alerts-prompt-dismissed";
 
@@ -50,7 +52,7 @@ export function AlertsPrompt({ hasProjects }: { hasProjects: boolean }) {
         toast.success("Done — we'll let you know when your designer replies");
         setShow(false);
       } else if (r === "denied") toast.error("Notifications are blocked for this site in your browser settings.");
-      else if (r === "unsupported" && isIos()) toast.info("On iPhone: tap Share → Add to Home Screen, open Bonito from there, then turn this on.");
+      else if (r === "unsupported" && isIos()) toast.info(`On iPhone: tap Share → Add to Home Screen, open ${APP_NAME} from there, then turn this on.`);
       else toast.error("Notifications aren't available on this browser.");
     } catch {
       toast.error("Couldn't turn on notifications");

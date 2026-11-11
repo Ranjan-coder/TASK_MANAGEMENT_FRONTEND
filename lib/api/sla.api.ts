@@ -29,6 +29,8 @@ export interface ReplyTimeSettings {
   holidays: { date: string; name: string }[];
   sla: { autoReplyMin: number; remindMin: number; escalateMin: number };
   moderation?: { threshold: number; window: number };
+  /** Posted to customers who write outside business hours (reply time added automatically) */
+  awayMessage?: string;
   escalationContacts: ContactRef[];
   defaultEscalationContact: ContactRef;
   updatedAt?: string;
@@ -56,6 +58,7 @@ export const slaApi = {
     sla?: ReplyTimeSettings["sla"];
     escalationContacts?: string[];
     moderation?: { threshold: number; window: number };
+    awayMessage?: string;
   }) => apiClient.put<ApiResponse<ReplyTimeSettings>>("/admin/settings", body),
   metrics: (days = 30) =>
     apiClient.get<ApiResponse<{ days: number; fastThresholdMin: number; designers: DesignerMetrics[] }>>(`/admin/sla/metrics?days=${days}`)

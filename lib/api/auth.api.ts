@@ -1,9 +1,9 @@
 import apiClient from "./client";
 
 export const authApi = {
-  prelogin: (data: { identifier: string }) => apiClient.post("/auth/prelogin", data),
+  prelogin: (data: { identifier: string; organisation: string }) => apiClient.post("/auth/prelogin", data),
 
-  login: (data: { identifier: string; authKey: string; password?: string }) =>
+  login: (data: { identifier: string; authKey: string; password?: string; organisation: string }) =>
     apiClient.post("/auth/login", data),
 
   verify2FA: (data: { tempToken: string; code: string }) =>
@@ -30,7 +30,7 @@ export const authApi = {
 
   getMe: () => apiClient.get("/auth/me"),
 
-  forgotPassword: (data: { email: string }) =>
+  forgotPassword: (data: { email: string; organisation: string }) =>
     apiClient.post("/auth/forgot-password", data),
 
   resetPassword: (token: string, data: { authKey: string; kdfSalt: string }) =>

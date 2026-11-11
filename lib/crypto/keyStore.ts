@@ -188,6 +188,43 @@ export const saveKeyMeta = async (userId: string, meta: KeyMeta): Promise<void> 
 
 export const loadKeyMeta = async (userId: string): Promise<KeyMeta | null> => idbGet<KeyMeta>(`meta:${userId}`);
 
+// ── Chat outbox (messages not yet confirmed by the server) ───────────────────
+// Encrypted request bodies only, never the typed text. Kept here so sign-out
+// (wipeLocalKeys) removes them, and shared computers keep them in memory only.
+
+export const saveOutbox = async (userId: string, entries: unknown[]): Promise<void> => {
+  if (entries.length === 0) await idbDelete(`outbox:${userId}`);
+  else await idbPut(`outbox:${userId}`, entries);
+};
+
+export const loadOutbox = async <T = unknown>(userId: string): Promise<T[]> =>
+  (await idbGet<T[]>(`outbox:${userId}`)) || [];
+
+// ── Chat drafts (unsent text, per chat) ──────────────────────────────────────
+// Encrypted with a key that never leaves this browser (non-extractable), kept
+// next to the chat keys: wiped at sign-out, memory only on shared computers.
+
+/** This device's draft key, created on first use. */
+export const draftKey = async (userId: string): Promise<CryptoKey> => {
+  const existing = await idbGet<CryptoKey>(`draftkey:${userId}`);
+  if (existing) return existing;
+  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  await idbPut(`draftkey:${userId}`, key);
+  return key;
+};
+
+export interface DraftBlob {
+  iv: Uint8Array<ArrayBuffer>;
+  data: ArrayBuffer;
+}
+
+export const saveDraftBlob = async (userId: string, blob: DraftBlob | null): Promise<void> => {
+  if (blob) await idbPut(`drafts:${userId}`, blob);
+  else await idbDelete(`drafts:${userId}`);
+};
+
+export const loadDraftBlob = async (userId: string): Promise<DraftBlob | null> => idbGet<DraftBlob>(`drafts:${userId}`);
+
 /** Newest key version, used for everything new (sending, wrapping). */
 export const latestKey = (keys: LocalKey[]): LocalKey =>
   keys.reduce((a, b) => (b.version > a.version ? b : a));

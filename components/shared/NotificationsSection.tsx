@@ -7,6 +7,8 @@ import { useAuthStore } from "@/store/authStore";
 import { usersApi } from "@/lib/api/users.api";
 import { apiErrorMessage } from "@/lib/api/customerAuth.api";
 import { canInstall, currentPushSubscription, disablePush, enablePush, isIos, isStandalone, onPwaChange, promptInstall, pushSupported } from "@/lib/pwa";
+import { APP_NAME } from "@/lib/brand";
+
 
 /** Settings → Notifications: this device's push, the installable app, and (customers) WhatsApp/SMS alerts. */
 export function NotificationsSection() {
@@ -42,7 +44,7 @@ export function NotificationsSection() {
           setPushOn(true);
           toast.success("You'll get notifications on this device");
         } else if (result === "denied") toast.error("Notifications are blocked. Allow them for this site in your browser settings.");
-        else if (result === "unsupported") toast.error(isIos() ? "On iPhone, first add Bonito to your Home Screen, then turn this on there." : "This browser doesn't support notifications.");
+        else if (result === "unsupported") toast.error(isIos() ? `On iPhone, first add ${APP_NAME} to your Home Screen, then turn this on there.` : "This browser doesn't support notifications.");
         else toast.error("Notifications aren't available right now.");
       }
     } catch (err) {
@@ -67,7 +69,7 @@ export function NotificationsSection() {
       <section className="space-y-2">
         <h2 className="text-base font-semibold text-white flex items-center gap-2"><BellRing className="h-4 w-4 text-violet-300" /> Notifications on this device</h2>
         <p className="text-xs text-slate-400">
-          {isCustomer ? "Know when your designer replies, even when Bonito isn't open." : "Customer reminders, escalations and alerts, even when Bonito isn't open."} Turn it on for each phone or computer you use.
+          {isCustomer ? `Know when your designer replies, even when ${APP_NAME} isn't open.` : `Customer reminders, escalations and alerts, even when ${APP_NAME} isn't open.`} Turn it on for each phone or computer you use.
         </p>
         {pushSupported() || isIos() ? (
           <button type="button" disabled={busy || pushOn === null} onClick={togglePush} className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold disabled:opacity-50">
@@ -84,9 +86,9 @@ export function NotificationsSection() {
           <h2 className="text-base font-semibold text-white flex items-center gap-2"><Smartphone className="h-4 w-4 text-violet-300" /> Install the app</h2>
           {installable ? (
             <>
-              <p className="text-xs text-slate-400">Add Bonito to your home screen — it opens like an app, no Play Store needed.</p>
+              <p className="text-xs text-slate-400">Add {APP_NAME} to your home screen — it opens like an app, no Play Store needed.</p>
               <button type="button" onClick={() => promptInstall()} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-700 text-slate-100 text-xs font-semibold hover:border-slate-500">
-                <Download className="h-3.5 w-3.5" /> Install Bonito
+                <Download className="h-3.5 w-3.5" /> Install {APP_NAME}
               </button>
             </>
           ) : isIos() ? (

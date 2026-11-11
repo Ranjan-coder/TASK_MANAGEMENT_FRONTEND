@@ -1,75 +1,30 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
-import { createDM, fetchConversations } from "@/lib/api/chat.api";
+import { createDM, fetchConversations, type DirectoryPerson } from "@/lib/api/chat.api";
 import { X, MessageSquare, Search, Loader2, ShieldCheck, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
-import { usersApi } from "@/lib/api/users.api";
 import { cn } from "@/lib/utils";
+import { useChatPeople } from "@/hooks/useStaffDirectory";
 
 interface Props {
   onClose: () => void;
 }
 
-// Search users via existing usersApi
-async function searchUsers(query: string) {
-  try {
-    const res = await usersApi.getUsers({
-      search: query.trim() || undefined,
-      limit: 20
-    });
-    return res.data?.data || [];
-  } catch {
-    return [];
-  }
-}
-
 export function DirectMessageModal({ onClose }: Props) {
   const router = useRouter();
-  const user = useAuthStore((s) => s.user);
   const conversations = useChatStore((s) => s.conversations);
   const setConversations = useChatStore((s) => s.setConversations);
   const onlineUsers = useChatStore((s) => s.onlineUsers);
 
   const [search, setSearch] = useState("");
-  const [users, setUsers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Colleagues in my organisation who have chat (never customers, never myself)
+  const { people: users, loading, hasMore, loadMore, loadingMore } = useChatPeople(search);
   const [startingWithId, setStartingWithId] = useState<string | null>(null);
 
-  // Load initial users on mount
-  useEffect(() => {
-    let isMounted = true;
-    setLoading(true);
-    searchUsers("")
-      .then((res) => {
-        if (isMounted) {
-          setUsers(res.filter((u: any) => u._id !== user?._id));
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [user]);
-
-  const handleSearch = async (q: string) => {
-    setSearch(q);
-    setLoading(true);
-    try {
-      const results = await searchUsers(q.trim());
-      setUsers(results.filter((u: any) => u._id !== user?._id));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleStartDM = async (targetUser: any) => {
+  const handleStartDM = async (targetUser: DirectoryPerson) => {
     if (startingWithId) return;
     setStartingWithId(targetUser._id);
 
@@ -134,8 +89,8 @@ export function DirectMessageModal({ onClose }: Props) {
             <input
               autoFocus
               value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search coworkers by name or email…"
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search coworkers by name…"
               className="w-full pl-9 pr-8 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-violet-500/50 transition"
             />
             {loading && (
@@ -192,7 +147,7 @@ export function DirectMessageModal({ onClose }: Props) {
                   />
                 </div>
 
-                {/* Name & Email */}
+                {/* Name & designation */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium text-slate-200 group-hover:text-white truncate">
@@ -208,7 +163,7 @@ export function DirectMessageModal({ onClose }: Props) {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 truncate">{u.email}</p>
+                  {u.designation && <p className="text-xs text-slate-500 truncate">{u.designation}</p>}
                 </div>
 
                 {/* Action button */}
@@ -224,6 +179,11 @@ export function DirectMessageModal({ onClose }: Props) {
               </button>
             );
           })}
+          {hasMore && (
+            <button onClick={loadMore} disabled={loadingMore} className="w-full py-2 text-xs text-violet-300 hover:text-violet-200 disabled:opacity-50">
+              {loadingMore ? "Loading…" : "Show more"}
+            </button>
+          )}
         </div>
 
         {/* Footer */}

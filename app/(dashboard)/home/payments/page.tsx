@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { paymentsApi, inr, toPaise, upiLink, METHOD_LABEL, type CustomerMilestone, type CustomerSchedule, type PayMethod, type PayTo } from "@/lib/api/payments.api";
 import { apiErrorMessage } from "@/lib/api/customerAuth.api";
 import { cn } from "@/lib/utils";
+import { OrgName } from "@/lib/brand";
+
 
 const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
 const copy = (text: string, label: string) => navigator.clipboard?.writeText(text).then(() => toast.success(`${label} copied`)).catch(() => {});
@@ -160,7 +162,7 @@ function PayToCard({ payTo }: { payTo: PayTo }) {
         {payTo.bankName && <div className="py-1.5 text-xs text-slate-400">{payTo.bankName}</div>}
       </div>
       {payTo.instructions && <p className="mt-2 text-xs text-slate-300">{payTo.instructions}</p>}
-      <p className="mt-3 text-[11px] text-slate-500">Bonito will never ask you to pay into a personal account or share an OTP. If in doubt, ask in your project chat.</p>
+      <p className="mt-3 text-[11px] text-slate-500"><OrgName /> will never ask you to pay into a personal account or share an OTP. If in doubt, ask in your project chat.</p>
     </section>
   );
 }

@@ -184,7 +184,7 @@ export function RequestApprovalDialog({ fileName, onCancel, onSubmit }: { fileNa
           <input autoFocus required minLength={2} maxLength={100} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Kitchen layout v2" className="mt-1 w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-slate-700 text-white text-sm" />
         </label>
         <p className="text-[11px] text-slate-500">
-          The customer gets Approve / Request changes buttons. The title and their answer are kept as a sign-off record that Bonito admins can see; the design file itself stays encrypted.
+          The customer gets Approve / Request changes buttons. The title and their answer are kept as a sign-off record that your admins can see; the design file itself stays encrypted.
         </p>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg border border-slate-700 text-sm text-slate-200">Cancel</button>

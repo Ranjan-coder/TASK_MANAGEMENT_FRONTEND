@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { authApi } from "../../../lib/api/auth.api";
-import { customerAuthApi, apiErrorMessage, isValidIndianMobile } from "../../../lib/api/customerAuth.api";
-import { prepareNewPassword } from "../../../lib/auth/credentials";
+import { customerAuthApi, apiErrorMessage, isValidIndianMobile, type ResetChoice } from "../../../lib/api/customerAuth.api";
+import { prepareNewPassword, rememberedOrgCode, ORG_CODE_RE } from "../../../lib/auth/credentials";
 import { passwordPolicyError } from "../../../lib/crypto/passwordKeys";
 
 type Mode = "email" | "phone";
-type PhoneStage = "enter-phone" | "enter-code";
+type PhoneStage = "enter-phone" | "enter-code" | "choose-org";
 
 const inputClass =
   "w-full px-4 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition";
@@ -25,6 +25,9 @@ export default function ForgotPasswordPage() {
 
   // Email reset link
   const [email, setEmail] = useState("");
+  // Required with an email (decision D-R1): each organisation's account resets on its own
+  const [orgCode, setOrgCode] = useState("");
+  useEffect(() => setOrgCode(rememberedOrgCode()), []);
   const [sent, setSent] = useState(false);
 
   // Mobile OTP reset
@@ -34,6 +37,8 @@ export default function ForgotPasswordPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resendIn, setResendIn] = useState(0);
+  // The number has accounts in several organisations: pick whose password to reset
+  const [choice, setChoice] = useState<(ResetChoice & { authKey: string; kdfSalt: string }) | null>(null);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -49,9 +54,10 @@ export default function ForgotPasswordPage() {
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (!ORG_CODE_RE.test(orgCode.trim().toLowerCase())) return setError("Enter your organisation code (it's in your invitation)");
     setLoading(true);
     try {
-      await authApi.forgotPassword({ email });
+      await authApi.forgotPassword({ email, organisation: orgCode.trim().toLowerCase() });
       setSent(true);
     } catch {
       setError("Something went wrong. Please try again.");
@@ -90,13 +96,38 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     try {
       const { authKey, kdfSalt } = await prepareNewPassword(newPassword);
-      await customerAuthApi.resetPasswordWithOtp({ phone, code, authKey, kdfSalt });
+      const res = await customerAuthApi.resetPasswordWithOtp({ phone, code, authKey, kdfSalt });
+      if (res.data.data?.chooseOrganisation) {
+        setChoice({ ...res.data.data, authKey, kdfSalt });
+        setPhoneStage("choose-org");
+        return;
+      }
       toast.success("Password reset. Please sign in with your new password.");
       router.push("/login");
     } catch (err) {
       const remaining = (err as any)?.response?.data?.errors?.[0]?.attemptsRemaining;
       const base = apiErrorMessage(err, "Could not reset the password.");
       setError(remaining ? `${base} ${remaining} attempt${remaining === 1 ? "" : "s"} left.` : base);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetFor = async (organisation: string) => {
+    if (!choice) return;
+    setError("");
+    setLoading(true);
+    try {
+      await customerAuthApi.resetPasswordWithOtp({
+        resetToken: choice.resetToken,
+        organisation,
+        authKey: choice.authKey,
+        kdfSalt: choice.kdfSalt
+      });
+      toast.success("Password reset. Please sign in with your new password.");
+      router.push(`/login?org=${encodeURIComponent(organisation)}`);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Could not reset the password."));
     } finally {
       setLoading(false);
     }
@@ -144,6 +175,10 @@ export default function ForgotPasswordPage() {
             </div>
           ) : (
             <form onSubmit={handleEmailSubmit} className="space-y-5">
+              <div>
+                <label htmlFor="forgot-org" className="block text-sm font-medium text-slate-300 mb-1.5">Organisation code</label>
+                <input id="forgot-org" type="text" required autoCapitalize="none" spellCheck={false} autoComplete="organization" value={orgCode} onChange={(e) => setOrgCode(e.target.value)} placeholder="e.g. acme" className={inputClass} />
+              </div>
               <div>
                 <label htmlFor="forgot-email" className="block text-sm font-medium text-slate-300 mb-1.5">Email address</label>
                 <input id="forgot-email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputClass} />
@@ -213,6 +248,24 @@ export default function ForgotPasswordPage() {
               </button>
             </div>
           </form>
+        )}
+
+        {mode === "phone" && phoneStage === "choose-org" && choice && (
+          <div className="space-y-3">
+            <p className="text-slate-400 text-sm">This number has accounts in more than one organisation. Which password do you want to reset?</p>
+            {choice.organisations.map((o) => (
+              <button
+                key={o.slug}
+                type="button"
+                disabled={loading}
+                onClick={() => resetFor(o.slug)}
+                className="w-full text-left px-4 py-3 rounded-xl bg-slate-700/50 border border-slate-600 hover:border-violet-500 text-white disabled:opacity-60"
+              >
+                <span className="font-medium">{o.name}</span>
+                <span className="block text-xs text-slate-400">Organisation code: {o.slug}</span>
+              </button>
+            ))}
+          </div>
         )}
 
         <p className="text-center text-slate-500 text-sm mt-6">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Flag, Star, X } from "lucide-react";
 import { toast } from "sonner";
@@ -50,8 +51,12 @@ export function ProjectChatActions({ conversation, myUserId, isCustomer }: Props
       >
         <Flag className="h-4 w-4" />
       </button>
-      {reporting && <ReportDialog conversation={conversation} myUserId={myUserId} isCustomer={isCustomer} onClose={() => setReporting(false)} />}
-      {rating && <RatingDialog conversationId={conversation._id} onClose={() => setRating(false)} />}
+      {/* Portalled to <body>: the chat header's backdrop-blur makes it the containing
+          block for position:fixed, which trapped these "full-screen" dialogs inside the
+          56px header — their top half (who, reason, description) was off screen */}
+      {reporting &&
+        createPortal(<ReportDialog conversation={conversation} myUserId={myUserId} isCustomer={isCustomer} onClose={() => setReporting(false)} />, document.body)}
+      {rating && createPortal(<RatingDialog conversationId={conversation._id} onClose={() => setRating(false)} />, document.body)}
     </>
   );
 }

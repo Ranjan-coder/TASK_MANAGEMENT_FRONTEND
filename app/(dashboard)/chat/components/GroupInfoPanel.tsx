@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import { Conversation, ConversationMember } from "@/types/chat";
+import { OrgName, orgNameNow } from "@/lib/brand";
 import {
   removeMember,
   updateConversation,
@@ -26,7 +27,8 @@ import {
   Check
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { StageEditor } from "./StageEditor";
+import { CustomerStage, StageEditor } from "./StageEditor";
+import { ProjectContactsSection } from "./ProjectContactsSection";
 import { toast } from "sonner";
 
 interface GroupInfoPanelProps {
@@ -56,7 +58,7 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
     if (refId(project.backupDesigner) === userId) return "Backup designer";
     if (refId(project.manager) === userId) return "Project manager";
     if (project.customers.some((c) => refId(c) === userId)) return "Customer";
-    return "Bonito team";
+    return `${orgNameNow("Our")} team`;
   };
 
   // ── Rename group ────────────────────────────────────────────────────────────
@@ -180,17 +182,26 @@ export function GroupInfoPanel({ conversation, onClose, onConversationUpdated }:
         <p className="text-xs text-slate-400">{conversation.members.length} members</p>
         {project && (
           <p className="text-[11px] text-center text-slate-500 px-2">
-            Project chat · {{ active: "Active", on_hold: "On hold", completed: "Completed" }[project.status]}. The team is managed by
-            Bonito — contact us to add or change people.
+            Project chat · {{ active: "Active", on_hold: "On hold", completed: "Completed" }[project.status]}. The team is managed by{" "}
+            <OrgName /> — contact us to add or change people.
           </p>
         )}
-        {project && (
-          <StageEditor
-            conversation={conversation}
-            canEdit={Boolean(user && [project.leadDesigner, project.backupDesigner, project.manager].some((u) => refId(u) === user._id))}
-            onUpdated={(t) => onConversationUpdated?.({ ...conversation, project: { ...project, ...t } })}
-          />
-        )}
+        {/* Who to contact about what (project-contacts-plan.md) */}
+        {project && <ProjectContactsSection conversation={conversation} isCustomer={user?.role === "customer"} />}
+        {project &&
+          (user?.role === "customer" ? (
+            // Customers: read-only, from the customer-safe /projects/mine (the staff
+            // editor's endpoint is staff-only — it left them on "Loading…")
+            <CustomerStage conversationId={conversation._id} />
+          ) : (
+            <StageEditor
+              conversation={conversation}
+              // Project team, stage handlers (e.g. a department head) and admins: the server
+              // checks who may do what; read-only roles only look
+              canEdit={Boolean(user && !["leadership", "marketing"].includes(user.role))}
+              onUpdated={(t) => onConversationUpdated?.({ ...conversation, project: { ...project, ...t } })}
+            />
+          ))}
       </div>
 
       {/* Members list */}

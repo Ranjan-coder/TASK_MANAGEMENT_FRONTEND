@@ -6,6 +6,9 @@ import { cn } from "@/lib/utils";
 import { contentApi, type PublicCampaign } from "@/lib/api/content.api";
 import { CampaignSlide } from "./CampaignSlide";
 import { ConsultationDialog } from "./ConsultationDialog";
+import { toast } from "sonner";
+import { hasModule } from "@/lib/modules";
+import { useAuthStore } from "@/store/authStore";
 
 const IMAGE_SLIDE_MS = 6000;
 
@@ -66,7 +69,10 @@ export function CampaignCarousel({ campaigns }: { campaigns: PublicCampaign[] })
 
   const onCta = (c: PublicCampaign) => {
     contentApi.recordEvent(c._id, "click");
-    if (c.cta.type === "consultation") setConsultFor(c);
+    if (c.cta.type !== "consultation") return;
+    // Consultation requests are the leads module; without it, point people to their team
+    if (hasModule(useAuthStore.getState().user, "leads")) setConsultFor(c);
+    else toast.info("Ask your project team about this offer.");
   };
 
   return (

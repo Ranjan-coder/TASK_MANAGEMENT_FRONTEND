@@ -33,6 +33,7 @@ interface FormState {
   escalateMin: number;
   holidays: { date: string; name: string }[];
   contacts: PickedUser[];
+  awayMessage: string;
 }
 
 const toForm = (s: ReplyTimeSettings): FormState => ({
@@ -43,7 +44,8 @@ const toForm = (s: ReplyTimeSettings): FormState => ({
   remindMin: s.sla.remindMin,
   escalateMin: s.sla.escalateMin,
   holidays: s.holidays,
-  contacts: s.escalationContacts.map((c) => ({ _id: c._id, name: c.name, email: c.email, role: c.role }))
+  contacts: s.escalationContacts.map((c) => ({ _id: c._id, name: c.name, email: c.email, role: c.role })),
+  awayMessage: s.awayMessage || ""
 });
 
 export default function ReplyTimesPage() {
@@ -64,7 +66,8 @@ export default function ReplyTimesPage() {
           businessHours: { start: f.start, end: f.end, workDays: f.workDays },
           sla: { autoReplyMin: f.autoReplyMin, remindMin: f.remindMin, escalateMin: f.escalateMin },
           holidays: f.holidays,
-          escalationContacts: f.contacts.map((c) => c._id)
+          escalationContacts: f.contacts.map((c) => c._id),
+          awayMessage: f.awayMessage
         })
       ).data.data,
     onSuccess: (data) => {
@@ -175,7 +178,7 @@ export default function ReplyTimesPage() {
           <p className="text-xs text-slate-400 mt-1">Get a notification and an email when a customer waits past the escalation timer. The project manager is always included too.</p>
           <div className="mt-3 flex items-center gap-2 text-xs">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-200">
-              <Lock className="h-3 w-3 text-slate-400" /> {defaultContact?.email || "admin@bonito.in"}
+              <Lock className="h-3 w-3 text-slate-400" /> {defaultContact?.email || "the monitoring account"}
             </span>
             <span className="text-slate-500">always included</span>
             {defaultContact?.missing && <span className="text-amber-300">— this account doesn’t exist yet</span>}
@@ -191,6 +194,24 @@ export default function ReplyTimesPage() {
               placeholder="Search staff by name or email"
             />
           </div>
+        </section>
+
+        <section className={card} aria-labelledby="away-h">
+          <h2 id="away-h" className="text-base font-semibold text-white">Away message</h2>
+          <p className="text-xs text-slate-400 mt-1">
+            Posted once in a project chat when a customer writes outside business hours. When the designer will reply is added
+            automatically. Leave empty for the standard message.
+          </p>
+          <textarea
+            value={form.awayMessage}
+            onChange={(e) => set("awayMessage", e.target.value.slice(0, 300))}
+            rows={3}
+            maxLength={300}
+            placeholder="Thanks for your message! Our studio is closed right now."
+            aria-label="Away message"
+            className={cn(input, "mt-3 w-full resize-none")}
+          />
+          <p className="text-[11px] text-slate-500 mt-1 text-right">{form.awayMessage.length}/300</p>
         </section>
 
         <section className={card} aria-labelledby="holidays-h">

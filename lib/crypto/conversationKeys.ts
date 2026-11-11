@@ -301,7 +301,18 @@ export class ConversationCrypto {
 
   /** Decrypts a message, attaching its plaintext and key (and franking details for reports). */
   async decrypt(msg: Message): Promise<Message> {
-    if (msg.type === "system" || msg.isDeleted || !msg.ciphertext || !msg.iv) return msg;
+    if (msg.type === "system" || msg.isDeleted) return msg;
+    // File-only messages have no text, but their attachments need the key that
+    // encrypted them (it used to stay unset, so nobody else could open a file)
+    if ((!msg.ciphertext || !msg.iv) && msg.attachments?.length && msg.keyRef) {
+      try {
+        const key = await this.keyForMessage(msg);
+        return key ? { ...msg, cryptoKey: key } : msg;
+      } catch {
+        return msg;
+      }
+    }
+    if (!msg.ciphertext || !msg.iv) return msg;
     try {
       const key = await this.keyForMessage(msg);
       if (!key) return { ...msg, decryptedContent: "🔒 Waiting for the key to this message", decryptionFailed: true };

@@ -1,13 +1,37 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { getSocket } from "@/lib/socket";
+import { findIndexById } from "@/lib/chat/messageStore";
+import {
+  fetchMessagesAround,
+  fetchMessagesAfter,
+  fetchPins,
+  pinMessage,
+  unpinMessage,
+  starMessage,
+  unstarMessage,
+  type PinnedItem
+} from "@/lib/api/chat.api";
+import { PinnedBar } from "../components/PinnedBar";
+import { ServiceBanner } from "../components/ServiceBanner";
+import { FilesPanel } from "../components/FilesPanel";
+import { ForwardDialog } from "../components/ForwardDialog";
+import { MessageMenu } from "../components/MessageMenu";
+import { useMessageMenu } from "@/lib/chat/messageMenu";
+import { ScheduledList, type ScheduledListHandle } from "../components/ScheduledList";
+import { sendEncryptedFile } from "@/lib/chat/files";
+import { scheduleMessage, openTeamNotes } from "@/lib/api/chat.api";
+import { createInitialGroupKeys } from "@/lib/crypto/conversationKeys";
+import { NotebookPen } from "lucide-react";
+import { SearchPanel } from "../components/SearchPanel";
+import { ArrowDown } from "lucide-react";
 import { useChatStore } from "@/store/chatStore";
 import { useAuthStore } from "@/store/authStore";
 import {
   fetchConversation,
   fetchMessages,
-  sendMessage,
   markRead,
   reactToMessage,
   deleteMessage,
@@ -21,26 +45,37 @@ import {
   rotateConversationGroupKey,
   type SendKey
 } from "@/lib/crypto/conversationKeys";
+import { queueMessage, retryMessage, discardMessage } from "@/lib/chat/chatOutbox";
+import { localIdFor } from "@/lib/chat/messageStore";
 import { useJoinConversation, useSendTyping, CHAT_KEYS_UPDATED_EVENT } from "@/hooks/useChat";
-import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { FileUploadPreview } from "../components/FileUploadPreview";
 import { GroupInfoPanel } from "../components/GroupInfoPanel";
 import { KeySetupWizard } from "../components/KeySetupWizard";
 import { ChatUnlock } from "../components/ChatUnlock";
 import { SafetyNumbersDialog } from "../components/SafetyNumbersDialog";
-import { ProjectChatActions, RatingPrompt } from "../components/ProjectChatActions";
-import { useProjectApprovals, useProjectStage, ApprovalCard, RequestApprovalDialog } from "../components/ProjectWorkflow";
-import { extrasApi, stageLabel, type Timeline, type DesignApproval } from "@/lib/api/projectExtras.api";
+import { RatingPrompt } from "../components/ProjectChatActions";
+import { useProjectApprovals, useProjectStage, RequestApprovalDialog } from "../components/ProjectWorkflow";
+import { ChatHeader } from "../components/ChatHeader";
+import { NoKeyBanner, TypingIndicator } from "../components/ChatNotices";
+import { MessageList, type MessageListHandle } from "../components/MessageList";
+import { MessageRow, type RowActions } from "../components/MessageRow";
+import { MentionProvider, useMentionInfo } from "../components/MentionContext";
+import { encodeMentions, type MentionPerson } from "@/lib/chat/mentions";
+import { receiptStateFrom, ticksForPage, type TickInfo } from "@/lib/chat/receipts";
+import { ThreadPanel } from "../components/ThreadPanel";
+import { MessageInfoDialog } from "../components/MessageInfoDialog";
+import { AtSign } from "lucide-react";
+import { extrasApi, type Timeline } from "@/lib/api/projectExtras.api";
 import { useOffensiveConfirm, ModerationWarningPopup } from "../components/ModerationUI";
 import { checkMessage, recordPrevented, loadLexicon } from "@/lib/moderation/lexicon";
+import { hasModule, orgHasModule } from "@/lib/modules";
 import { EditCancelledError, type ModerationFlag } from "@/lib/crypto/conversationKeys";
-import { Conversation, Message, KeyRef } from "@/types/chat";
-import { cn } from "@/lib/utils";
-import { ArrowLeft, Users, Lock, Info, ShieldCheck, ShieldAlert, Key } from "lucide-react";
+import { Conversation, Message } from "@/types/chat";
 import { toast } from "sonner";
 
 const NO_MESSAGES: Message[] = [];
+const messageKey = (m: Message) => m._id;
 
 // Conversations fully loaded by this page during this visit. Reopening one shows the
 // cached (already decrypted) messages at once and refreshes quietly in the background.
@@ -60,91 +95,17 @@ function reuseDecrypted(server: Message, cached?: Message): Message | null {
   };
 }
 
-/** Stable callbacks for message rows (they read the latest handlers through a ref). */
-interface RowActions {
-  react: (id: string, emoji: string) => void;
-  del: (id: string, scope: "me" | "everyone") => void;
-  reply: (msg: Message) => void;
-  edit: (id: string, encrypted: EncryptedText) => Promise<void>;
-  requestApproval: (msg: Message) => void;
-  putApproval: (a: DesignApproval) => void;
-}
-
-/**
- * One message row. Memoized: a typing, presence or reaction event elsewhere no longer
- * re-renders every bubble in the history — only rows whose props actually changed.
- */
-const MessageRow = memo(function MessageRow({
-  msg,
-  prevMessage,
-  isMine,
-  showUnreadMarker,
-  unreadDividerRef,
-  encryptFn,
-  actions,
-  approval,
-  canRequestApproval,
-  canDecide,
-  canWithdraw,
-  lazy
-}: {
-  lazy: boolean;
-  msg: Message;
-  prevMessage?: Message;
-  isMine: boolean;
-  showUnreadMarker: boolean;
-  unreadDividerRef: React.RefObject<HTMLDivElement | null>;
-  encryptFn: (text: string) => Promise<EncryptedText>;
-  actions: RowActions;
-  approval?: DesignApproval;
-  canRequestApproval: boolean;
-  canDecide: boolean;
-  canWithdraw: boolean;
-}) {
-  return (
-    // Older rows skip layout and paint while off screen (see .chat-row-lazy in globals.css)
-    <div className={lazy ? "chat-row-lazy" : undefined}>
-      {showUnreadMarker && (
-        <div ref={unreadDividerRef} className="flex items-center gap-3 py-3">
-          <div className="flex-1 h-px bg-rose-500/30" />
-          <span className="text-[10px] text-rose-400 font-semibold uppercase tracking-wider shrink-0">
-            New messages
-          </span>
-          <div className="flex-1 h-px bg-rose-500/30" />
-        </div>
-      )}
-      <MessageBubble
-        message={msg}
-        isMine={isMine}
-        prevMessage={prevMessage}
-        sessionKey={msg.cryptoKey ?? null}
-        onReact={(emoji) => actions.react(msg._id, emoji)}
-        onDelete={(scope) => actions.del(msg._id, scope)}
-        onReply={() => actions.reply(msg)}
-        onEdit={isMine ? (encrypted) => actions.edit(msg._id, encrypted) : undefined}
-        encryptFn={encryptFn}
-        onRequestApproval={canRequestApproval ? () => actions.requestApproval(msg) : undefined}
-        footer={
-          approval ? (
-            <ApprovalCard approval={approval} canDecide={canDecide} canWithdraw={canWithdraw} onChange={actions.putApproval} />
-          ) : undefined
-        }
-      />
-    </div>
-  );
-});
-
 export default function ConversationPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   // Narrow subscriptions: only this conversation's messages/typing, not the whole store
-  // (the whole-store read re-rendered this page on every event in every chat).
   const convMessages = useChatStore((s) => s.messages[conversationId]) ?? NO_MESSAGES;
   const typing = useChatStore((s) => s.typingUsers[conversationId]);
-  const onlineUsers = useChatStore((s) => s.onlineUsers);
   const setMessages = useChatStore((s) => s.setMessages);
   const prependMessages = useChatStore((s) => s.prependMessages);
+  const replaceWindow = useChatStore((s) => s.replaceWindow);
+  const appendPage = useChatStore((s) => s.appendPage);
   const updateMessage = useChatStore((s) => s.updateMessage);
   const setActiveConversation = useChatStore((s) => s.setActiveConversation);
   const markConversationRead = useChatStore((s) => s.markConversationRead);
@@ -154,6 +115,24 @@ export default function ConversationPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  // Also in a ref: search loads several older pages in a row, faster than re-renders
+  const nextCursorRef = useRef<string | null>(null);
+  const setCursor = useCallback((c: string | null) => {
+    nextCursorRef.current = c;
+    setNextCursor(c);
+  }, []);
+  // After a jump into older history: newer messages to load below
+  const [hasNewer, setHasNewer] = useState(false);
+  const newerCursorRef = useRef<string | null>(null);
+  const [loadingNewer, setLoadingNewer] = useState(false);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [pendingJump, setPendingJump] = useState<string | null>(null);
+  const [pins, setPins] = useState<PinnedItem[]>([]);
+  const [canPin, setCanPin] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+  const scheduledRef = useRef<ScheduledListHandle>(null);
   // Resolves the right key for each message (versioned keys, see conversationKeys.ts)
   const [convCrypto, setConvCrypto] = useState<ConversationCrypto | null>(null);
   // Key for new messages; null while this user has no key for the conversation yet
@@ -164,17 +143,18 @@ export default function ConversationPage() {
   const [showSafetyNumbers, setShowSafetyNumbers] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
-  /** First unread message's id for this viewing session — renders the "New messages" divider and is the initial scroll target. Null once there's nothing unread (or after a remount, since opening already marks read). */
+  /** First unread message's id for this viewing session — renders the "New messages" divider and is the initial scroll target. */
   const [unreadMarkerId, setUnreadMarkerId] = useState<string | null>(null);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const topSentinelRef = useRef<HTMLDivElement>(null);
-  const unreadDividerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<MessageListHandle>(null);
+  const mentionInfo = useMentionInfo(conv, user);
+  const [openThread, setOpenThread] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<Message | null>(null);
 
   useJoinConversation(conversationId);
   const sendTyping = useSendTyping(conversationId);
 
-  const typingNames = typing ? Array.from(typing) : [];
+  const typingNames = useMemo(() => (typing ? Array.from(typing) : []), [typing]);
 
   // ── Build conversation crypto ───────────────────────────────────────────────
   const buildCrypto = useCallback(
@@ -205,15 +185,24 @@ export default function ConversationPage() {
 
   // ── Load conversation + messages ────────────────────────────────────────────
   useEffect(() => {
-    // Wait for the authenticated user to be resolved (e.g. on a hard refresh,
-    // /auth/me is still in flight) — otherwise deriveKey() runs with user=null,
-    // the session key permanently fails to derive, and never retries because
-    // this effect doesn't depend on `user`.
+    // Wait for the authenticated user (on a hard refresh /auth/me is still in flight),
+    // otherwise the keys would be derived for nobody and never retried.
     if (!conversationId || !user) return;
     setActiveConversation(conversationId);
     setReplyTo(null);
     setShowFileUpload(false);
     setUnreadMarkerId(null);
+    setMentionQueue([]);
+    setOpenThread(null);
+    setInfoMessage(null);
+    setShowSearch(false);
+    setShowFiles(false);
+    useMessageMenu.getState().close();
+    setForwardMsg(null);
+    setHasNewer(false);
+    newerCursorRef.current = null;
+    setPins([]);
+    setHighlightId(null);
 
     // Reopening a chat seen earlier in this visit: show what we have immediately
     const cached = useChatStore.getState().messages[conversationId] || [];
@@ -227,12 +216,13 @@ export default function ConversationPage() {
     (async () => {
       if (!quick) setLoading(true);
       try {
-        const [convData, msgData] = await Promise.all([
-          fetchConversation(conversationId),
-          fetchMessages(conversationId)
-        ]);
+        const [convData, msgData] = await Promise.all([fetchConversation(conversationId), fetchMessages(conversationId)]);
         setConv(convData);
         convCache.set(conversationId, convData);
+        // Others' delivered / read times for the ticks (customers: the team's only)
+        useChatStore
+          .getState()
+          .initReceipts(conversationId, receiptStateFrom(convData, user._id, user.role === "customer" && Boolean(convData.project)));
 
         const c = await buildCrypto(convData);
         setConvCrypto(c);
@@ -243,8 +233,18 @@ export default function ConversationPage() {
         setMessages(conversationId, decrypted);
         loadedThisSession.add(conversationId);
         setHasMore(msgData.hasMore);
-        setNextCursor(msgData.nextCursor);
+        setCursor(msgData.nextCursor);
         setUnreadMarkerId(msgData.unreadMarkerId);
+        // Unread messages that ping me, oldest first (before opening marks them read)
+        const firstUnread = msgData.unreadMarkerId ? decrypted.findIndex((m) => m._id === msgData.unreadMarkerId) : -1;
+        setMentionQueue(
+          firstUnread < 0
+            ? []
+            : decrypted
+                .slice(firstUnread)
+                .filter((m) => m.sender._id !== user._id && (m.mentionsAll || m.mentions?.includes(user._id)))
+                .map((m) => m._id)
+        );
 
         if (decrypted.length > 0) {
           markRead(decrypted[decrypted.length - 1]._id).catch(() => {});
@@ -261,8 +261,9 @@ export default function ConversationPage() {
         // a member), and get a new key after someone is removed. The first staff
         // member of the team to open the chat replaces it, so only the team can
         // read what's sent from then on. Everyone gets it via "chat:rekey".
+        // Team notes (internalFor) work the same way when someone leaves the project team
         const mine = convData.members.find((m) => m.user._id === user._id);
-        if (c && convData.project && convData.rekeyRequested && mine?.role === "admin" && user.role !== "customer") {
+        if (c && (convData.project || convData.internalFor) && convData.rekeyRequested && mine?.role === "admin" && user.role !== "customer") {
           rotateConversationGroupKey(
             convData,
             user._id,
@@ -302,63 +303,170 @@ export default function ConversationPage() {
     return () => window.removeEventListener(CHAT_KEYS_UPDATED_EVENT, onKeysUpdated);
   }, [conversationId, user, buildCrypto, setMessages]);
 
-  // ── Scroll on new messages ──────────────────────────────────────────────────
-  // Jump instantly when a conversation is first opened (avoids animating through
-  // the whole loaded history), but animate smoothly for messages that arrive
-  // while already viewing the conversation. If there's an unread marker, the
-  // first jump lands at the start of the unread section instead of the very
-  // bottom, so nothing unread scrolls past unseen.
-  const lastScrolledConvRef = useRef<string | null>(null);
+  // ── First unread message: start the reading there instead of the bottom ─────
   useEffect(() => {
-    // Skip the trivial empty-array render on mount (before messages load) —
-    // otherwise it consumes the "first scroll" flag before there's anything
-    // to scroll to, and the real initial load ends up animating instead of
-    // jumping instantly.
-    if (convMessages.length === 0) return;
+    if (unreadMarkerId) listRef.current?.scrollToKey(unreadMarkerId);
+  }, [unreadMarkerId]);
 
-    const isFirstScrollForConv = lastScrolledConvRef.current !== conversationId;
-    lastScrolledConvRef.current = conversationId;
-
-    if (isFirstScrollForConv && unreadMarkerId && unreadDividerRef.current) {
-      unreadDividerRef.current.scrollIntoView({ behavior: "auto", block: "start" });
-      return;
+  // ── Older messages (the list asks when the reader nears the top) ───────────
+  const loadingMoreRef = useRef(false);
+  const loadMore = useCallback(async () => {
+    const cursor = nextCursorRef.current;
+    if (loadingMoreRef.current || !cursor) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const data = await fetchMessages(conversationId, cursor);
+      const decrypted = await decryptAll(data.messages, convCrypto);
+      prependMessages(conversationId, decrypted);
+      setHasMore(data.hasMore);
+      setCursor(data.nextCursor);
+    } catch {
+      toast.error("Couldn't load earlier messages");
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
     }
+  }, [conversationId, convCrypto, decryptAll, prependMessages, setCursor]);
 
-    bottomRef.current?.scrollIntoView({ behavior: isFirstScrollForConv ? "auto" : "smooth" });
-  }, [convMessages.length, conversationId, unreadMarkerId]);
+  // ── Jump to a message (search, pins, stars, older mentions) ────────────────
+  const flash = useCallback((id: string) => {
+    setHighlightId(id);
+    setTimeout(() => setHighlightId((h) => (h === id ? null : h)), 2500);
+  }, []);
 
-  // ── IntersectionObserver for infinite scroll ───────────────────────────────
-  useEffect(() => {
-    if (!topSentinelRef.current || !hasMore) return;
-    const observer = new IntersectionObserver(
-      async ([entry]) => {
-        if (!entry.isIntersecting || loadingMore || !nextCursor) return;
-        setLoadingMore(true);
-        try {
-          const data = await fetchMessages(conversationId, nextCursor);
-          const decrypted = await decryptAll(data.messages, convCrypto);
-          prependMessages(conversationId, decrypted);
-          setHasMore(data.hasMore);
-          setNextCursor(data.nextCursor);
-        } finally {
-          setLoadingMore(false);
+  const jumpTo = useCallback(
+    async (id: string) => {
+      const list = useChatStore.getState().messages[conversationId] || [];
+      if (findIndexById(list, id) >= 0) {
+        listRef.current?.scrollToKey(id, "center");
+        flash(id);
+        return;
+      }
+      try {
+        // Not loaded: fetch a window around it, replacing what's shown
+        const data = await fetchMessagesAround(conversationId, id);
+        if (data.threadRoot) {
+          setShowSearch(false);
+          setShowGroupInfo(false);
+          setOpenThread(data.threadRoot);
+          return;
         }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(topSentinelRef.current);
-    return () => observer.disconnect();
-  }, [hasMore, nextCursor, loadingMore, convCrypto, conversationId]);
+        replaceWindow(conversationId, await decryptAll(data.messages, convCrypto));
+        setHasMore(data.hasMore);
+        setCursor(data.nextCursor);
+        setHasNewer(data.hasNewer);
+        newerCursorRef.current = data.newerCursor;
+        setUnreadMarkerId(null);
+        setPendingJump(id);
+      } catch {
+        toast.error("That message isn't available any more");
+      }
+    },
+    [conversationId, convCrypto, decryptAll, flash, setCursor]
+  );
 
-  // ── Send message ────────────────────────────────────────────────────────────
-  // Sends are chained onto this ref so they hit the server strictly in the
-  // order the user triggered them. Without this, firing off several
-  // messages quickly lets their encrypt+POST round trips race independently
-  // — whichever one's request finishes first gets written (and
-  // server-timestamped) first, which visibly reorders messages. Sorting on
-  // display can't fix that after the fact, since the server itself recorded
-  // the wrong order — the sends have to be serialized at the source.
-  const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Scroll once the jumped-to window is rendered
+  useEffect(() => {
+    if (pendingJump && listRef.current?.scrollToKey(pendingJump, "center")) {
+      flash(pendingJump);
+      setPendingJump(null);
+    }
+  }, [pendingJump, convMessages, flash]);
+
+  // Scrolling down after a jump: the next newer page
+  const loadingNewerRef = useRef(false);
+  const loadNewer = useCallback(async () => {
+    const cursor = newerCursorRef.current;
+    if (loadingNewerRef.current || !cursor) return;
+    loadingNewerRef.current = true;
+    setLoadingNewer(true);
+    try {
+      const data = await fetchMessagesAfter(conversationId, cursor);
+      appendPage(conversationId, await decryptAll(data.messages, convCrypto));
+      setHasNewer(data.hasNewer);
+      newerCursorRef.current = data.newerCursor;
+    } catch {
+      toast.error("Couldn't load newer messages");
+    } finally {
+      loadingNewerRef.current = false;
+      setLoadingNewer(false);
+    }
+  }, [conversationId, convCrypto, decryptAll]);
+
+  /** Back to the newest messages after a jump. */
+  const jumpToLatest = useCallback(async () => {
+    try {
+      const data = await fetchMessages(conversationId);
+      setMessages(conversationId, await decryptAll(data.messages, convCrypto));
+      setHasMore(data.hasMore);
+      setCursor(data.nextCursor);
+      setHasNewer(false);
+      newerCursorRef.current = null;
+      listRef.current?.scrollToBottom();
+    } catch {
+      toast.error("Couldn't load the latest messages");
+    }
+  }, [conversationId, convCrypto, decryptAll, setMessages, setCursor]);
+
+  // Opened from a link to one message (e.g. Starred): jump there once loaded
+  const searchParams = useSearchParams();
+  const linkedMessage = searchParams.get("m");
+  useEffect(() => {
+    if (!linkedMessage || loading || !/^[a-f0-9]{24}$/i.test(linkedMessage)) return;
+    jumpTo(linkedMessage);
+    router.replace(`/chat/${conversationId}`, { scroll: false });
+  }, [linkedMessage, loading, jumpTo, router, conversationId]);
+
+  // ── Pins (decrypted here), refreshed when anyone pins or unpins ─────────────
+  const loadPins = useCallback(async () => {
+    try {
+      const data = await fetchPins(conversationId);
+      const opened = await decryptAll(data.pins.map((p) => p.message), convCrypto);
+      setPins(data.pins.map((p, i) => ({ ...p, message: opened[i] })));
+      setCanPin(data.canPin);
+    } catch {
+      /* pins are an extra: the chat works without them */
+    }
+  }, [conversationId, convCrypto, decryptAll]);
+  useEffect(() => {
+    if (loading) return;
+    loadPins();
+    const socket = getSocket();
+    const onPins = ({ conversationId: id }: { conversationId: string }) => id === conversationId && loadPins();
+    socket.on("chat:pins:updated", onPins);
+    return () => {
+      socket.off("chat:pins:updated", onPins);
+    };
+  }, [loading, loadPins, conversationId]);
+  const pinnedIds = useMemo(() => new Set(pins.map((p) => p.message._id)), [pins]);
+
+  const togglePin = useCallback(
+    async (msg: Message, pinned: boolean) => {
+      try {
+        await (pinned ? unpinMessage(conversationId, msg._id) : pinMessage(conversationId, msg._id));
+        loadPins();
+      } catch (err) {
+        toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Couldn't change the pin");
+      }
+    },
+    [conversationId, loadPins]
+  );
+
+  const toggleStar = useCallback(
+    async (msg: Message) => {
+      const next = !msg.starred;
+      useChatStore.getState().patchMessage(conversationId, msg._id, { starred: next }); // optimistic
+      try {
+        await (next ? starMessage(msg._id) : unstarMessage(msg._id));
+      } catch {
+        useChatStore.getState().patchMessage(conversationId, msg._id, { starred: !next });
+        toast.error("Couldn't save the star");
+      }
+    },
+    [conversationId]
+  );
+
   const { confirmOffensive, offensiveDialog } = useOffensiveConfirm();
 
   // ── Project workflow: live stage + design approvals ─────────────────────────
@@ -375,19 +483,33 @@ export default function ConversationPage() {
   );
   const isProjectChat = Boolean(conv?.project);
   useEffect(() => {
-    if (isProjectChat) loadLexicon(); // warm the word list so the first send isn't delayed
+    if (isProjectChat && hasModule(useAuthStore.getState().user, "moderation")) loadLexicon(); // warm the word list so the first send isn't delayed
   }, [isProjectChat]);
 
+  // ── Send message ────────────────────────────────────────────────────────────
+  // The message shows at once and goes through the outbox (lib/chat/chatOutbox.ts):
+  // queued per chat, retried after network trouble, never sent twice. Encryption
+  // is chained so messages enter the queue in the order they were typed.
+  const encryptChainRef = useRef<Promise<void>>(Promise.resolve());
   const handleSend = useCallback(
-    async (text: string): Promise<boolean | void> => {
+    async (
+      text: string,
+      picked: MentionPerson[] = [],
+      thread?: { threadRoot: string; alsoInChat: boolean }
+    ): Promise<boolean | void> => {
       if (!text.trim() || !sendKey || !user) return;
-      const plaintext = text.trim();
-      const currentReplyTo = replyTo;
+      // Reading older history after a jump: go back to the newest messages first
+      if (hasNewer && (!thread || thread.alsoInChat)) await jumpToLatest();
+      const typed = text.trim();
+      // The chat's "replying to" bar belongs to the chat's composer, not a thread's
+      const currentReplyTo = thread ? null : replyTo;
+      // "@Asha Rao" → <@id> inside the encrypted text; the ids also go alongside (CH-D1)
+      const { text: plaintext, mentions, mentionsAll } = encodeMentions(typed, picked, mentionInfo.canMentionAll);
 
       // Project chats: on-device abuse check before anything is encrypted or sent
       let moderation: ModerationFlag | undefined;
       if (conv?.project) {
-        const scan = await checkMessage(plaintext);
+        const scan = await checkMessage(typed);
         if (scan.hitCount > 0 && scan.severity) {
           if (!(await confirmOffensive(scan))) {
             recordPrevented();
@@ -397,52 +519,174 @@ export default function ConversationPage() {
         }
       }
 
-      const next = sendQueueRef.current.catch(() => {}).then(async () => {
-        try {
-          const { ciphertext, iv, keyRef, franking, frankingKey } = await encryptTextWith(sendKey, plaintext);
-          const saved = await sendMessage(conversationId, {
+      const clientMsgId = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      if (!thread) setReplyTo(null);
+
+      const step = encryptChainRef.current.catch(() => {}).then(async () => {
+        const { ciphertext, iv, keyRef, franking, frankingKey } = await encryptTextWith(sendKey, plaintext);
+        queueMessage({
+          conversationId,
+          body: {
             ciphertext,
             iv,
             type: "text",
             replyTo: currentReplyTo?._id,
             keyRef,
             franking,
-            moderation
-          });
-
-          // Show it immediately using the server's confirmed response instead
-          // of waiting for the chat:message socket event to round-trip back to
-          // us — that echo is what was causing the couple-second delay before
-          // your own sent messages appeared. We already have the plaintext (we
-          // just encrypted it), so there's nothing left to decrypt either.
-          // appendMessage dedups by _id, so the later socket echo of this same
-          // message is a harmless no-op.
-          useChatStore.getState().appendMessage(conversationId, {
-            ...saved,
+            moderation,
+            clientMsgId,
+            ...(mentions.length ? { mentions } : {}),
+            ...(mentionsAll ? { mentionsAll } : {}),
+            ...(thread ? { threadRoot: thread.threadRoot, ...(thread.alsoInChat ? { alsoInChat: true } : {}) } : {})
+          },
+          local: {
+            _id: localIdFor(clientMsgId),
+            clientMsgId,
+            conversation: conversationId,
+            sender: user,
+            type: "text",
+            ciphertext,
+            iv,
+            keyRef,
+            franking,
             decryptedContent: plaintext,
             cryptoKey: sendKey.key,
             frankingKey,
-            frankVerified: Boolean(saved.franking?.commitment)
-          });
-          if (conv) {
-            useChatStore.getState().upsertConversation({
-              ...conv,
-              lastMessage: saved,
-              lastActivityAt: saved.createdAt
-            });
+            frankVerified: true,
+            attachments: [],
+            reactions: [],
+            replyTo: currentReplyTo,
+            mentions,
+            mentionsAll,
+            threadRoot: thread?.threadRoot ?? null,
+            alsoInChat: thread?.alsoInChat || undefined,
+            isEdited: false,
+            isDeleted: false,
+            createdAt,
+            updatedAt: createdAt,
+            localStatus: "sending"
           }
-
-          setReplyTo(null);
-        } catch {
-          toast.error("Failed to send message");
-        }
+        });
       });
-
-      sendQueueRef.current = next;
-      await next;
+      encryptChainRef.current = step;
+      try {
+        await step;
+        if (!thread || thread.alsoInChat) listRef.current?.scrollToBottom();
+      } catch {
+        if (!thread) setReplyTo(currentReplyTo);
+        toast.error("Couldn't encrypt this message");
+        return false; // keep the text in the box
+      }
     },
-    [sendKey, conversationId, user, replyTo, conv, confirmOffensive]
+    [sendKey, conversationId, user, replyTo, conv, confirmOffensive, mentionInfo, hasNewer, jumpToLatest]
   );
+
+  // ── @ picker ranking: who spoke most recently (last 200 messages, one pass) ─
+  const recencyRank = useMemo(() => {
+    const rank = new Map<string, number>();
+    const from = Math.max(0, convMessages.length - 200);
+    for (let i = from; i < convMessages.length; i++) rank.set(convMessages[i].sender._id, i + 1);
+    return rank;
+  }, [convMessages]);
+  const mentionRecency = useCallback((id: string) => recencyRank.get(id) ?? 0, [recencyRank]);
+
+  // ── Unread messages that mention me: the "@" chip jumps through them ────────
+  const [mentionQueue, setMentionQueue] = useState<string[]>([]);
+  const jumpToNextMention = useCallback(() => {
+    setMentionQueue((q) => {
+      const [next, ...rest] = q;
+      if (next) listRef.current?.scrollToKey(next, "center");
+      return rest;
+    });
+  }, []);
+
+  // ── Voice notes (P4): recorded here, encrypted like any file, then uploaded ──
+  const handleVoiceNote = useCallback(
+    async (blob: Blob, durationSec: number, mimeType: string, thread?: { threadRoot: string; alsoInChat: boolean }) => {
+      if (!sendKey) return;
+      if (hasNewer && (!thread || thread.alsoInChat)) await jumpToLatest();
+      try {
+        const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
+        const saved = await sendEncryptedFile({
+          conversationId,
+          sendKey,
+          data: blob,
+          name: `Voice note ${new Date().toLocaleString()}.${ext}`,
+          mimeType,
+          fileType: "audio",
+          durationSec,
+          threadRoot: thread?.threadRoot,
+          alsoInChat: thread?.alsoInChat
+        });
+        // Show it now (the live echo is a no-op once it's here); attach the key for playback
+        useChatStore.getState().appendMessage(conversationId, { ...saved, cryptoKey: sendKey.key });
+        if (!thread || thread.alsoInChat) listRef.current?.scrollToBottom();
+      } catch (err) {
+        toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Couldn't send the voice note");
+      }
+    },
+    [sendKey, conversationId, hasNewer, jumpToLatest]
+  );
+
+  // ── Scheduled send (P4): encrypted now, posted by the server at that time ───
+  const handleSchedule = useCallback(
+    async (text: string, picked: MentionPerson[], sendAt: Date, thread?: { threadRoot: string; alsoInChat: boolean }): Promise<boolean | void> => {
+      if (!text.trim() || !sendKey || !user) return false;
+      const typed = text.trim();
+      const { text: plaintext, mentions, mentionsAll } = encodeMentions(typed, picked, mentionInfo.canMentionAll);
+      let moderation: ModerationFlag | undefined;
+      if (conv?.project) {
+        const scan = await checkMessage(typed);
+        if (scan.hitCount > 0 && scan.severity) {
+          if (!(await confirmOffensive(scan))) {
+            recordPrevented();
+            return false;
+          }
+          moderation = { flagged: true, severity: scan.severity, hitCount: Math.min(scan.hitCount, 20) };
+        }
+      }
+      try {
+        const { ciphertext, iv, keyRef, franking } = await encryptTextWith(sendKey, plaintext);
+        await scheduleMessage(conversationId, {
+          ciphertext,
+          iv,
+          type: "text",
+          keyRef,
+          franking,
+          moderation,
+          ...(mentions.length ? { mentions } : {}),
+          ...(mentionsAll ? { mentionsAll } : {}),
+          ...(thread ? { threadRoot: thread.threadRoot, ...(thread.alsoInChat ? { alsoInChat: true } : {}) } : {}),
+          sendAt: sendAt.toISOString()
+        });
+        toast.success(`Scheduled for ${sendAt.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}`);
+        scheduledRef.current?.refresh();
+      } catch (err) {
+        toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Couldn't schedule the message");
+        return false;
+      }
+    },
+    [sendKey, user, mentionInfo, conv, confirmOffensive, conversationId]
+  );
+
+  // ── Team notes (P4): the project team's private chat, its own key ──────────
+  const openNotes = useCallback(async () => {
+    if (!conv?.project || !user) return;
+    try {
+      if (conv.internalNotes) return router.push(`/chat/${conv.internalNotes}`);
+      // Start it: a new group key wrapped for the project's staff only (never a customer)
+      const customers = new Set((conv.project.customers || []).map((c) => refOf(c)));
+      const staff = conv.members
+        .filter((m) => m.user && !customers.has(m.user._id))
+        .map((m) => ({ _id: m.user._id, publicKey: m.user.publicKey, keyVersion: m.user.keyVersion }));
+      const { keys } = await createInitialGroupKeys(user._id, staff);
+      const res = await openTeamNotes(conv._id, keys);
+      router.push(`/chat/${res.conversationId}`);
+    } catch (err) {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Couldn't open team notes");
+    }
+  }, [conv, user, router]);
 
   // ── Edit message ────────────────────────────────────────────────────────────
   const handleEdit = useCallback(
@@ -479,9 +723,7 @@ export default function ConversationPage() {
       const original = msgs.find((m) => m._id === msgId);
       if (!original) return;
 
-      // Optimistic: update immediately instead of waiting on the
-      // chat:message:deleted / chat:message:deletedForMe socket round-trip,
-      // which previously made deletes look like they silently did nothing.
+      // Optimistic: update immediately instead of waiting on the socket round-trip
       if (scope === "everyone") {
         useChatStore.getState().removeMessage(conversationId, msgId);
       } else {
@@ -497,8 +739,7 @@ export default function ConversationPage() {
         } else {
           useChatStore.getState().appendMessage(conversationId, original);
         }
-        // Surface the real reason when we have one (e.g. the 10-minute
-        // "delete for everyone" window has passed since this was opened).
+        // Surface the real reason when we have one (e.g. the 10-minute window has passed)
         toast.error(err?.response?.data?.message || "Failed to delete message");
       }
     },
@@ -534,7 +775,18 @@ export default function ConversationPage() {
     reply: setReplyTo,
     edit: handleEdit,
     requestApproval: setApprovalTarget,
-    putApproval
+    putApproval,
+    retry: (msg) => msg.clientMsgId && retryMessage(msg.clientMsgId),
+    discard: (msg) => msg.clientMsgId && discardMessage(conversationId, msg.clientMsgId),
+    openThread: (msg) => {
+      setShowGroupInfo(false);
+      setShowSearch(false);
+      setOpenThread(msg._id);
+    },
+    info: setInfoMessage,
+    togglePin,
+    toggleStar,
+    forward: setForwardMsg
   };
   const rowActions = useMemo<RowActions>(
     () => ({
@@ -543,31 +795,81 @@ export default function ConversationPage() {
       reply: (msg) => actionsRef.current.reply(msg),
       edit: (id, enc) => actionsRef.current.edit(id, enc),
       requestApproval: (msg) => actionsRef.current.requestApproval(msg),
-      putApproval: (a) => actionsRef.current.putApproval(a)
+      putApproval: (a) => actionsRef.current.putApproval(a),
+      retry: (msg) => actionsRef.current.retry(msg),
+      discard: (msg) => actionsRef.current.discard(msg),
+      openThread: (msg) => actionsRef.current.openThread(msg),
+      info: (msg) => actionsRef.current.info(msg),
+      togglePin: (msg, pinned) => actionsRef.current.togglePin(msg, pinned),
+      toggleStar: (msg) => actionsRef.current.toggleStar(msg),
+      forward: (msg) => actionsRef.current.forward(msg)
     }),
     []
   );
 
-  // ── Header helpers ──────────────────────────────────────────────────────────
-  const getLabel = () => {
-    if (!conv) return "";
-    if (conv.type === "group") return conv.name || "Group";
-    return conv.members.find((m) => m.user._id !== user?._id)?.user.name || "Unknown";
+  // ── Ticks for my messages: one pass over the page (lib/chat/receipts.ts) ────
+  const receipts = useChatStore((s) => s.receipts[conversationId]);
+  const ticks = useMemo(() => {
+    if (!receipts || !user) return [] as ReturnType<typeof ticksForPage>;
+    return ticksForPage(
+      convMessages.map((m) => new Date(m.createdAt).getTime()),
+      convMessages.map((m) => m.sender._id === user._id && !m.localStatus && m.type !== "system"),
+      receipts
+    );
+  }, [convMessages, receipts, user]);
+  const isGroup = conv?.type === "group";
+  const tickTitle = (t: TickInfo) => {
+    if (receipts?.team) return t.tick === "read" ? "Seen by the team" : t.tick === "delivered" ? "Delivered" : "Sent";
+    if (!isGroup) return t.tick === "read" ? "Seen" : t.tick === "delivered" ? "Delivered" : "Sent";
+    return t.tick === "read" ? "Seen by everyone" : `Seen by ${t.readBy} of ${t.of}`;
   };
 
-  const getSubtitle = () => {
-    if (!conv) return "";
-    if (conv.project) {
-      const status = { active: "", on_hold: " · On hold", completed: " · Completed" }[conv.project.status];
-      return `${stageLabel(conv.project.stage)} · ${conv.members.length} people${status}`;
-    }
-    if (conv.type === "group") return `${conv.members.length} members`;
-    const other = conv.members.find((m) => m.user._id !== user?._id);
-    return onlineUsers.has(other?.user._id || "") ? "● Online" : "Offline";
-  };
+  /** One message row; `list` gives the previous message (chat or thread). */
+  const renderAnyRow = useCallback(
+    (msg: Message, idx: number, list: readonly Message[], inThread: boolean, tick?: TickInfo | null) => {
+      const approval = approvalFor(msg._id);
+      const mine = msg.sender._id === user?._id;
+      return (
+        <MessageRow
+          msg={msg}
+          prevMessage={list[idx - 1]}
+          isMine={mine}
+          showUnreadMarker={!inThread && msg._id === unreadMarkerId}
+          encryptFn={encryptFn}
+          actions={rowActions}
+          approval={approval}
+          canRequestApproval={
+            Boolean(conv?.project) && !isCustomer && ["image", "file"].includes(msg.type) && !msg.isDeleted &&
+            (!approval || approval.status === "withdrawn")
+          }
+          canDecide={isCustomer}
+          canWithdraw={Boolean(approval) && !isCustomer && (approval!.requestedBy?._id === user?._id || isTeamLead)}
+          tick={tick?.tick}
+          tickTitle={tick ? tickTitle(tick) : undefined}
+          seenBy={tick && isGroup && !receipts?.team && tick.readBy > 0 ? tick.readBy : undefined}
+          // Names of who saw it: staff only, in groups (CH-D3)
+          canInfo={mine && isGroup && !isCustomer && !receipts?.team}
+          inThread={inThread}
+          pinned={pinnedIds.has(msg._id)}
+          canPin={canPin}
+          highlighted={highlightId === msg._id}
+          canForward={!isCustomer}
+        />
+      );
+    },
+    // tickTitle reads receipts/isGroup, listed below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [approvalFor, user?._id, unreadMarkerId, encryptFn, rowActions, conv?.project, isCustomer, isTeamLead, isGroup, receipts, pinnedIds, canPin, highlightId]
+  );
+  const renderRow = useCallback(
+    (msg: Message, idx: number) => renderAnyRow(msg, idx, convMessages, false, ticks[idx]),
+    [renderAnyRow, convMessages, ticks]
+  );
+  const decryptForThread = useCallback((msgs: Message[]) => decryptAll(msgs, convCrypto), [decryptAll, convCrypto]);
 
   const otherMember = conv?.members.find((m) => m.user._id !== user?._id);
   const myMember = conv?.members.find((m) => m.user._id === user?._id);
+  const waitingForOther = conv?.type === "dm" && !otherMember?.user.publicKey;
 
   if (loading) {
     return (
@@ -578,6 +880,7 @@ export default function ConversationPage() {
   }
 
   return (
+    <MentionProvider value={mentionInfo}>
     <div className="flex-1 flex min-w-0 h-full overflow-hidden">
       {keysLocked && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
@@ -605,7 +908,6 @@ export default function ConversationPage() {
         <ModerationWarningPopup conversationId={conv._id} warningAt={conv.moderation?.warningAt} active={Boolean(conv.moderation?.openIncident)} />
       )}
 
-      {/* Key setup wizard overlay */}
       {showKeySetup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
           <div className="w-full max-w-md">
@@ -614,7 +916,6 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* Safety numbers dialog */}
       {showSafetyNumbers && conv?.type === "dm" && otherMember?.user.publicKey && (
         <SafetyNumbersDialog
           myPublicKey={myMember?.user.publicKey || user?.publicKey || ""}
@@ -626,170 +927,91 @@ export default function ConversationPage() {
 
       {/* Main chat column */}
       <div className="flex-1 flex flex-col bg-slate-950 min-w-0 h-full">
-        {/* Header */}
-        <div className="h-14 px-3 sm:px-4 flex items-center gap-2 sm:gap-3 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm shrink-0">
-          <button
-            onClick={() => router.push("/chat")}
-            className="md:hidden h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition shrink-0"
-            aria-label="Back to conversations"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
+        <ChatHeader
+          conv={conv}
+          user={user}
+          showGroupInfo={showGroupInfo}
+          onBack={() => router.push("/chat")}
+          onToggleGroupInfo={() => {
+            setOpenThread(null); // one side panel at a time
+            setShowSearch(false);
+            setShowGroupInfo((v) => !v);
+          }}
+          onOpenSearch={() => {
+            setOpenThread(null);
+            setShowGroupInfo(false);
+            setShowFiles(false);
+            setShowSearch((v) => !v);
+          }}
+          onOpenFiles={() => {
+            setOpenThread(null);
+            setShowGroupInfo(false);
+            setShowSearch(false);
+            setShowFiles((v) => !v);
+          }}
+          onOpenTeamNotes={conv?.project && !isCustomer ? openNotes : undefined}
+          onOpenSafetyNumbers={() => setShowSafetyNumbers(true)}
+          onOpenKeySetup={() => setShowKeySetup(true)}
+        />
 
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-600/30 to-blue-600/30 border border-violet-500/25 flex items-center justify-center font-bold text-sm text-violet-300 shrink-0">
-            {conv?.type === "group" ? <Users className="h-4 w-4" /> : getLabel()[0]?.toUpperCase()}
-          </div>
+        {/* Ratings belong to the reports module: no prompt (and no refused request) without it */}
+        {conv?.project && user?.role === "customer" && orgHasModule(user, "reports") && <RatingPrompt conversationId={conv._id} />}
 
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white truncate">{getLabel()}</p>
-            <p className={cn("text-[11px] truncate", getSubtitle().startsWith("●") ? "text-emerald-400" : "text-slate-400")}>
-              {getSubtitle()}
-            </p>
-          </div>
+        {!sendKey && !keysLocked && <NoKeyBanner waitingFor={waitingForOther ? otherMember?.user.name || "" : null} />}
 
-          {/* Header action buttons */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* Project chats: rate / report (customers), flag a customer (staff) */}
-            {conv?.project && user && (
-              <ProjectChatActions conversation={conv} myUserId={user._id} isCustomer={user.role === "customer"} />
-            )}
+        {/* Customers: when the team usually replies, and whether they're in now */}
+        {conv?.project && isCustomer && <ServiceBanner conversationId={conversationId} />}
 
-            {/* Safety numbers (DM only) */}
-            {conv?.type === "dm" && otherMember?.user.publicKey && (
-              <button
-                onClick={() => setShowSafetyNumbers(true)}
-                title="Verify safety numbers"
-                className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition"
-              >
-                <ShieldCheck className="h-4 w-4" />
-              </button>
-            )}
-
-            {/* Key setup */}
-            <button
-              onClick={() => setShowKeySetup(true)}
-              title="Manage encryption keys"
-              className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-violet-400 hover:bg-slate-800 transition"
-            >
-              <Key className="h-4 w-4" />
+        {/* Team notes: a reminder of who can read this */}
+        {conv?.internalFor && (
+          <div className="px-3 sm:px-4 py-1.5 border-b border-amber-500/20 bg-amber-500/10 flex items-center gap-2 text-[11px] text-amber-200 shrink-0" role="note">
+            <NotebookPen className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="flex-1 truncate">Team notes · only the project team can read this. Customers never see it.</span>
+            <button onClick={() => router.push(`/chat/${conv.internalFor}`)} className="font-semibold hover:underline shrink-0">
+              Back to the project chat
             </button>
-
-            {/* Group info */}
-            {conv?.type === "group" && (
-              <button
-                onClick={() => setShowGroupInfo((v) => !v)}
-                className={cn(
-                  "h-8 w-8 rounded-lg flex items-center justify-center transition",
-                  showGroupInfo ? "bg-violet-600/25 text-violet-400" : "text-slate-400 hover:text-white hover:bg-slate-800"
-                )}
-              >
-                <Info className="h-4 w-4" />
-              </button>
-            )}
-
-            {/* E2E lock badge */}
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-              <Lock className="h-3 w-3 text-emerald-400" />
-              <span className="text-[10px] text-emerald-400 font-medium hidden sm:block">E2E</span>
-            </div>
-          </div>
-        </div>
-
-        {conv?.project && user?.role === "customer" && <RatingPrompt conversationId={conv._id} />}
-
-        {/* No key for this conversation yet */}
-        {!sendKey && !keysLocked && (
-          <div className="mx-4 mt-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-3">
-            <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0" />
-            <div className="flex-1 min-w-0">
-              {conv?.type === "dm" && !otherMember?.user.publicKey ? (
-                <>
-                  <p className="text-sm text-amber-300 font-medium">
-                    Waiting for {otherMember?.user.name || "this person"} to open Chat
-                  </p>
-                  <p className="text-xs text-amber-400/70">
-                    Messages will be end-to-end encrypted once they sign in to chat for the first time.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-amber-300 font-medium">Getting access to this chat</p>
-                  <p className="text-xs text-amber-400/70">
-                    The next member who opens this chat will share its encryption key with you automatically.
-                  </p>
-                </>
-              )}
-            </div>
           </div>
         )}
 
-        {/* Messages */}
-        {/* flex-col anchors short conversations to the bottom via mt-auto on
-            the first child (below), not `justify-end` on this container —
-            justify-end + overflow-y-auto is a well-known flexbox trap: once
-            content overflows, browsers fail to expose the scrollable region
-            above the fold, so you get stuck and can't reach the true top.
-            mt-auto on the first child achieves the same bottom-anchoring for
-            short content without that overflow bug, since justify-content
-            here stays at its normal default (flex-start). */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col">
-          <div ref={topSentinelRef} className="h-1 mt-auto" />
-          {loadingMore && (
-            <div className="flex justify-center py-2">
-              <div className="animate-spin h-4 w-4 rounded-full border-2 border-violet-500 border-t-transparent" />
-            </div>
+        <PinnedBar pins={pins} canPin={canPin} onJump={jumpTo} onUnpin={(id) => togglePin({ _id: id } as Message, true)} />
+
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          <MessageList
+            key={conversationId}
+            ref={listRef}
+            listId={conversationId}
+            items={convMessages}
+            getKey={messageKey}
+            renderRow={renderRow}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onReachTop={loadMore}
+            hasNewer={hasNewer}
+            loadingNewer={loadingNewer}
+            onReachBottom={loadNewer}
+            footer={hasNewer ? undefined : <TypingIndicator names={typingNames} />}
+          />
+          {hasNewer && (
+            <button
+              onClick={jumpToLatest}
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 h-9 px-4 rounded-full bg-violet-600 text-white text-xs font-semibold shadow-lg hover:bg-violet-500 transition"
+            >
+              <ArrowDown className="h-3.5 w-3.5" aria-hidden />
+              Jump to latest
+            </button>
           )}
-
-          {convMessages.map((msg, idx) => {
-            const approval = approvalFor(msg._id);
-            return (
-              <MessageRow
-                key={msg._id}
-                msg={msg}
-                prevMessage={convMessages[idx - 1]}
-                isMine={msg.sender._id === user?._id}
-                showUnreadMarker={msg._id === unreadMarkerId}
-                unreadDividerRef={unreadDividerRef}
-                encryptFn={encryptFn}
-                actions={rowActions}
-                approval={approval}
-                canRequestApproval={
-                  Boolean(conv?.project) && !isCustomer && ["image", "file"].includes(msg.type) && !msg.isDeleted &&
-                  (!approval || approval.status === "withdrawn")
-                }
-                canDecide={isCustomer}
-                canWithdraw={Boolean(approval) && !isCustomer && (approval!.requestedBy?._id === user?._id || isTeamLead)}
-                lazy={idx < convMessages.length - 40}
-              />
-            );
-          })}
-
-          {/* Typing indicator */}
-          {typingNames.length > 0 && (
-            <div className="flex items-end gap-2 pl-9 mt-1">
-              <div className="bg-slate-800 border border-slate-700 rounded-2xl rounded-bl-sm px-4 py-2.5">
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-slate-400">
-                    {typingNames.slice(0, 2).join(", ")} {typingNames.length === 1 ? "is" : "are"} typing
-                  </span>
-                  <span className="flex gap-0.5 ml-1">
-                    {[0, 1, 2].map((i) => (
-                      <span
-                        key={i}
-                        className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce"
-                        style={{ animationDelay: `${i * 0.15}s` }}
-                      />
-                    ))}
-                  </span>
-                </div>
-              </div>
-            </div>
+          {mentionQueue.length > 0 && (
+            <button
+              onClick={jumpToNextMention}
+              className="absolute bottom-3 right-4 z-20 flex items-center gap-1 h-9 px-3 rounded-full bg-amber-500 text-slate-950 text-xs font-bold shadow-lg shadow-amber-500/20 hover:bg-amber-400 transition"
+              aria-label={`Jump to the next of ${mentionQueue.length} messages that mention you`}
+            >
+              <AtSign className="h-3.5 w-3.5" aria-hidden />
+              {mentionQueue.length}
+            </button>
           )}
-
-          <div ref={bottomRef} />
         </div>
 
-        {/* File upload preview */}
         {showFileUpload && (
           <FileUploadPreview
             conversationId={conversationId}
@@ -799,9 +1021,14 @@ export default function ConversationPage() {
           />
         )}
 
-        {/* Message input */}
+        {user && !isCustomer && <ScheduledList ref={scheduledRef} conversationId={conversationId} crypto={convCrypto} me={user} />}
+
         <MessageInput
           onSend={handleSend}
+          mentionRecency={mentionRecency}
+          draftKey={conversationId}
+          onVoiceNote={(blob, sec, mime) => handleVoiceNote(blob, sec, mime)}
+          onSchedule={isCustomer ? undefined : (text, picked, at) => handleSchedule(text, picked, at)}
           quickReplyFill={
             user && user.role !== "customer" && user.role !== "marketing"
               ? (text) => {
@@ -819,7 +1046,7 @@ export default function ConversationPage() {
           placeholder={
             sendKey
               ? "Type a message…"
-              : conv?.type === "dm" && !otherMember?.user.publicKey
+              : waitingForOther
               ? `Waiting for ${otherMember?.user.name || "user"} to open Chat…`
               : "Waiting for access to this chat…"
           }
@@ -828,25 +1055,77 @@ export default function ConversationPage() {
         />
       </div>
 
-      {/* Group info panel (drawer on mobile/tablet, side panel on desktop) */}
-      {showGroupInfo && conv?.type === "group" && (
-        <>
-          {/* Mobile backdrop */}
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden animate-in fade-in duration-200"
-            onClick={() => setShowGroupInfo(false)}
-          />
+      {infoMessage && receipts && (
+        <MessageInfoDialog message={infoMessage} receipts={receipts} onClose={() => setInfoMessage(null)} />
+      )}
 
-          {/* Panel container */}
-          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-80 shadow-2xl lg:static lg:w-80 lg:z-auto lg:shadow-none shrink-0 h-full flex flex-col animate-in slide-in-from-right duration-200">
-            <GroupInfoPanel
-              conversation={conv}
-              onClose={() => setShowGroupInfo(false)}
-              onConversationUpdated={setConv}
+      {forwardMsg && <ForwardDialog message={forwardMsg} onClose={() => setForwardMsg(null)} />}
+
+      {/* The one message-options menu for this screen (opened from any bubble's ⌄ button) */}
+      <MessageMenu />
+
+      {/* Shared files (drawer on mobile/tablet, side panel on desktop) */}
+      {showFiles && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden" onClick={() => setShowFiles(false)} />
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-96 shadow-2xl lg:static lg:z-auto lg:shadow-none shrink-0 h-full flex flex-col">
+            <FilesPanel conversationId={conversationId} crypto={convCrypto} onJump={jumpTo} onClose={() => setShowFiles(false)} />
+          </div>
+        </>
+      )}
+
+      {/* Search this chat (drawer on mobile/tablet, side panel on desktop) */}
+      {showSearch && user && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden" onClick={() => setShowSearch(false)} />
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-96 shadow-2xl lg:static lg:z-auto lg:shadow-none shrink-0 h-full flex flex-col">
+            <SearchPanel
+              messages={convMessages}
+              myId={user._id}
+              members={(conv?.members || []).filter((m) => m.user).map((m) => ({ id: m.user._id, name: m.user.name }))}
+              hasMore={hasMore}
+              loadOlder={loadMore}
+              onPick={jumpTo}
+              onClose={() => setShowSearch(false)}
             />
           </div>
         </>
       )}
+
+      {/* Thread (drawer on mobile/tablet, side panel on desktop) */}
+      {openThread && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden" onClick={() => setOpenThread(null)} />
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-96 shadow-2xl lg:static lg:z-auto lg:shadow-none shrink-0 h-full flex flex-col">
+            <ThreadPanel
+              key={openThread}
+              conversationId={conversationId}
+              rootId={openThread}
+              onClose={() => setOpenThread(null)}
+              decrypt={decryptForThread}
+              onSend={handleSend}
+              onVoiceNote={handleVoiceNote}
+              onSchedule={isCustomer ? undefined : handleSchedule}
+              renderRow={renderAnyRow}
+              disabled={!sendKey}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Group info panel (drawer on mobile/tablet, side panel on desktop) */}
+      {showGroupInfo && conv?.type === "group" && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden animate-in fade-in duration-200"
+            onClick={() => setShowGroupInfo(false)}
+          />
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-80 shadow-2xl lg:static lg:w-80 lg:z-auto lg:shadow-none shrink-0 h-full flex flex-col animate-in slide-in-from-right duration-200">
+            <GroupInfoPanel conversation={conv} onClose={() => setShowGroupInfo(false)} onConversationUpdated={setConv} />
+          </div>
+        </>
+      )}
     </div>
+    </MentionProvider>
   );
 }

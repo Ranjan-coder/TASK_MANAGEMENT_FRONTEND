@@ -79,6 +79,8 @@ export interface AdminMilestone {
   title: string;
   amountPaise: number;
   dueDate: string | null;
+  /** Falls due when the project reaches this workflow stage */
+  stageKey?: string | null;
   status: MilestoneStatus;
   claim?: { method: PayMethod; reference: string; amountPaise: number; paidOn: string; note: string; at: string };
   lastClaimRejection?: { note: string; at: string };
@@ -90,6 +92,8 @@ export interface AdminFinance {
   projectId: string;
   projectName: string;
   finance: { contractValuePaise: number; gstRatePct: number; notes: string; milestones: AdminMilestone[]; summary: Summary } | null;
+  /** The project's workflow stages (a payment line can fall due at one) */
+  stages?: { key: string; name: string; current: boolean }[];
 }
 
 export interface AdminPaymentRow {
@@ -143,7 +147,7 @@ export const paymentsApi = {
       .get<ApiResponse<{ rows: AdminPaymentRow[]; withoutSchedule: { projectId: string; projectName: string; customers: string[] }[] }>>("/admin/payments", { params: { filter } })
       .then((r) => r.data.data),
   adminGet: (projectId: string) => apiClient.get<ApiResponse<AdminFinance>>(`/admin/payments/${projectId}`).then((r) => r.data.data),
-  save: (projectId: string, body: { contractValuePaise: number; gstRatePct: number; notes: string; milestones: { _id?: string; title: string; amountPaise: number; dueDate: string | null }[] }) =>
+  save: (projectId: string, body: { contractValuePaise: number; gstRatePct: number; notes: string; milestones: { _id?: string; title: string; amountPaise: number; dueDate: string | null; stageKey?: string | null }[] }) =>
     apiClient.put<ApiResponse<AdminFinance>>(`/admin/payments/${projectId}`, body).then((r) => r.data),
   confirm: (projectId: string, milestoneId: string, body: PaymentBody) =>
     apiClient.post<ApiResponse<AdminFinance & { receiptNo: string }>>(`${adminPath(projectId, milestoneId)}/confirm`, body).then((r) => r.data),
@@ -159,8 +163,6 @@ export const paymentsApi = {
   },
 
   myReferrals: () => apiClient.get<ApiResponse<MyReferrals>>("/referrals/mine").then((r) => r.data.data),
-  checkReferral: (code: string) =>
-    apiClient.get<ApiResponse<{ valid: boolean; referrerFirstName?: string; friendReward?: string }>>(`/customer/auth/referral/${encodeURIComponent(code)}`).then((r) => r.data.data),
   adminReferrals: (status?: string) =>
     apiClient
       .get<ApiResponse<{ rows: AdminReferral[]; counts: Record<string, number>; programme: { enabled: boolean; referrerReward: string; friendReward: string; terms: string } }>>(
@@ -173,6 +175,6 @@ export const paymentsApi = {
 
 /** upi:// link that opens the customer's UPI app with the amount filled in. */
 export const upiLink = (payTo: PayTo, amountPaise: number, note: string) => {
-  const params = new URLSearchParams({ pa: payTo.upiId, pn: payTo.companyName || "Bonito", am: (amountPaise / 100).toFixed(2), cu: "INR", tn: note.slice(0, 50) });
+  const params = new URLSearchParams({ pa: payTo.upiId, pn: payTo.companyName || "Payee", am: (amountPaise / 100).toFixed(2), cu: "INR", tn: note.slice(0, 50) });
   return `upi://pay?${params.toString()}`;
 };

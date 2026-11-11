@@ -61,7 +61,7 @@ export function RecoveryKeySection() {
         <p className="text-sm font-semibold text-white">Your recovery key</p>
         <p className="text-xs text-slate-300">
           Write it down or store it in a password manager. It's the only way to read older messages if you forget your
-          password. Bonito can't show it again or recover it for you.
+          password. Nobody can show it again or recover it for you.
         </p>
         <div className="flex items-start gap-2">
           <code className="flex-1 font-mono text-sm tracking-wide text-white bg-slate-950/70 border border-slate-700 rounded-lg p-3 break-all select-all">

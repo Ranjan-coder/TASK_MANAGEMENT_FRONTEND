@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -15,8 +15,10 @@ import { toast } from "sonner";
 import { homeRouteFor } from "@/lib/utils";
 import { ApiResponse, User } from "@/types";
 import { PhoneVerification } from "@/components/auth/PhoneVerification";
-import { prepareLogin, finishSignIn } from "@/lib/auth/credentials";
+import { hasModule } from "@/lib/modules";
+import { prepareLogin, finishSignIn, rememberedOrgCode, rememberOrgCode, ORG_CODE_RE } from "@/lib/auth/credentials";
 import { isValidIndianMobile, type PhoneVerificationStep, type VerifiedSession } from "@/lib/api/customerAuth.api";
+import { ProductLogo } from "@/lib/brand";
 
 const loginSchema = z.object({
   identifier: z
@@ -26,7 +28,14 @@ const loginSchema = z.object({
     .refine((v) => (v.includes("@") ? z.string().email().safeParse(v).success : isValidIndianMobile(v)), {
       message: "Enter a valid email or 10-digit mobile number"
     }),
-  password: z.string().min(1, "Password is required")
+  password: z.string().min(1, "Password is required"),
+  // Every sign-in names the organisation (decision D-R1); remembered on this device
+  organisation: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(1, "Enter your organisation code")
+    .refine((v) => ORG_CODE_RE.test(v), { message: "Enter a valid organisation code" })
 });
 
 type LoginFormData = z.infer<typeof loginSchema>;
@@ -46,7 +55,9 @@ export default function LoginPage() {
   /** Signed in: store the user, unlock chat keys on this device, go home. */
   const completeSignIn = async (signedIn: User, message: string) => {
     setUser(signedIn);
-    if (wrapKeyRef.current) await finishSignIn(signedIn._id, wrapKeyRef.current);
+    // Chat keys only where the organisation has chat (the product owner has none)
+    // Encryption keys where chat or the (encrypted) Planner is available
+    if (wrapKeyRef.current && (hasModule(signedIn, "chat") || hasModule(signedIn, "planner"))) await finishSignIn(signedIn._id, wrapKeyRef.current);
     wrapKeyRef.current = null;
     toast.success(message);
     router.push(homeRouteFor(signedIn));
@@ -67,20 +78,32 @@ export default function LoginPage() {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors }
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema)
   });
 
+  // Organisation code from an invite link (?org=…) or the last successful sign-in
+  useEffect(() => {
+    const fromLink = new URLSearchParams(window.location.search).get("org")?.trim().toLowerCase() || "";
+    const code = ORG_CODE_RE.test(fromLink) ? fromLink : rememberedOrgCode();
+    if (code) {
+      setValue("organisation", code);
+    }
+  }, [setValue]);
+
   const onLoginSubmit = async (data: LoginFormData) => {
     setIsLoading(true);
     try {
       // The password never leaves the browser: derive the login key from it
-      const { body, wrapKey } = await prepareLogin(data.identifier.trim(), data.password, trustDevice);
+      const organisation = data.organisation;
+      const { body, wrapKey } = await prepareLogin(data.identifier.trim(), data.password, trustDevice, organisation);
       wrapKeyRef.current = wrapKey;
       const res = await apiClient.post<
         ApiResponse<{ requires2FA?: boolean; tempToken?: string; user?: User } & Partial<PhoneVerificationStep>>
       >("/auth/login", body);
+      rememberOrgCode(organisation);
 
       if (res.data.data.requiresPhoneVerification) {
         setPhoneStep(res.data.data as PhoneVerificationStep);
@@ -123,10 +146,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-950">
       <Card className="w-full max-w-md shadow-lg border-slate-200 dark:border-slate-800">
         <CardHeader className="text-center space-y-1">
-          <div className="mx-auto h-10 w-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-xl mb-2">
-            T
-          </div>
-          <CardTitle className="text-xl">Sign in to Bonito</CardTitle>
+          <ProductLogo className="mx-auto h-12 w-12 mb-2" />
+          <CardTitle className="text-xl">Sign in</CardTitle>
           <CardDescription>
             {phoneStep
               ? "Verify your mobile number to continue"
@@ -141,6 +162,27 @@ export default function LoginPage() {
             <PhoneVerification step={phoneStep} onVerified={handlePhoneVerified} onCancel={() => setPhoneStep(null)} />
           ) : !requires2FA ? (
             <form onSubmit={handleSubmit(onLoginSubmit)} className="space-y-4">
+              <div className="space-y-1">
+                <label htmlFor="login-organisation" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Organisation code
+                </label>
+                <Input
+                  id="login-organisation"
+                  type="text"
+                  autoComplete="organization"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="e.g. acme"
+                  {...register("organisation")}
+                  disabled={isLoading}
+                />
+                {errors.organisation ? (
+                  <p className="text-xs text-red-500">{errors.organisation.message}</p>
+                ) : (
+                  <p className="text-[11px] text-slate-500">It&apos;s in your invitation. We remember it on this device.</p>
+                )}
+              </div>
+
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Email or mobile number
@@ -181,6 +223,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
+
               <label htmlFor="login-trust" className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
                 <input
                   id="login-trust"
@@ -200,11 +243,8 @@ export default function LoginPage() {
                 {isLoading ? "Signing in..." : "Sign In"}
               </Button>
 
-              <p className="text-center text-sm text-slate-500 dark:text-slate-400 pt-1">
-                Don&apos;t have an account?{" "}
-                <a href="/signup" className="text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 font-medium transition-colors">
-                  Create account
-                </a>
+              <p className="text-center text-xs text-slate-500 dark:text-slate-400 pt-1">
+                New here? Your organisation creates your account and sends you the details.
               </p>
             </form>
           ) : (
