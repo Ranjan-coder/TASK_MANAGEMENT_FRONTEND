@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert, X, Plus, Trash2, Search, Save } from "lucide-react";
 import { toast } from "sonner";
@@ -149,7 +150,7 @@ function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 <ul className="text-xs text-slate-300 space-y-0.5">
                   {i.reports.map((r) => (
                     <li key={r._id}>
-                      <a href="/admin/reports" className="text-violet-300 hover:underline">#{r.ticketNo}</a> · {r.reporter?.name} about {r.reportedUser?.name} · {r.status.replace("_", " ")} · {when(r.createdAt)}
+                      <Link href="/admin/reports" className="text-violet-300 hover:underline">#{r.ticketNo}</Link> · {r.reporter?.name} about {r.reportedUser?.name} · {r.status.replace("_", " ")} · {when(r.createdAt)}
                     </li>
                   ))}
                 </ul>

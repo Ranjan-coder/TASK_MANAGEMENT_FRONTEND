@@ -30,6 +30,8 @@ export const STAGE_MIN_REASON = 5;
 export interface MyProject extends Timeline {
   /** The company's own stages, as the customer sees them (project workflows) */
   flow?: import("./workflow.api").CustomerFlowView;
+  /** Who to contact about what (project-contacts-plan.md) */
+  contacts?: import("./contacts.api").ProjectContact[];
   _id: string;
   name: string;
   status: "active" | "on_hold" | "completed";

@@ -2,6 +2,7 @@
 
 import { useRef, useCallback, KeyboardEvent, useState, useId, useEffect } from "react";
 import { draftsReady, getDraft, setDraft } from "@/lib/chat/drafts";
+import { onComposeChange } from "@/lib/chat/composeBus";
 import { Send, Paperclip, Smile, X, Reply, AtSign, Users, CalendarClock } from "lucide-react";
 import { VoiceRecorder } from "./VoiceRecorder";
 import { SchedulePicker } from "./SchedulePicker";
@@ -108,6 +109,21 @@ export function MessageInput({
     return () => {
       live = false;
     };
+  }, [draftKey]);
+
+  // "Ask in chat" (composeBus) changed this chat's draft: show it and put the caret after it
+  useEffect(() => {
+    if (!draftKey) return;
+    return onComposeChange((key) => {
+      const el = textareaRef.current;
+      const d = getDraft(key);
+      if (key !== draftKey || !el || !d) return;
+      el.value = d.text;
+      pickedRef.current = d.picked;
+      fitHeight(el);
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
+    });
   }, [draftKey]);
 
   const handleInput = () => {

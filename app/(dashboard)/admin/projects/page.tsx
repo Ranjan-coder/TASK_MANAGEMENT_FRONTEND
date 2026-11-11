@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, X, FolderKanban, Lock } from "lucide-react";
+import { Plus, Pencil, X, FolderKanban, Lock, Contact } from "lucide-react";
+import { contactsApi } from "@/lib/api/contacts.api";
+import { ContactsEditor } from "@/components/projects/ContactsEditor";
 import { toast } from "sonner";
 import { projectsApi, type AdminProject, type ProjectStatus, type PersonRef } from "@/lib/api/projects.api";
 import { apiErrorMessage } from "@/lib/api/customerAuth.api";
@@ -51,6 +53,37 @@ const fromProject = (p: AdminProject): FormState => {
   };
 };
 
+/**
+ * Company-wide contacts (project-contacts-plan.md P2), e.g. one payments contact
+ * for every project. A project's own contacts (chat → Group info) replace these
+ * topic by topic.
+ */
+function CompanyContactsButton() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const { data, refetch, isFetching } = useQuery({ queryKey: ["company-contacts"], queryFn: contactsApi.company, enabled: open });
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-700 text-slate-200 hover:bg-slate-800 text-sm font-semibold">
+        <Contact className="h-4 w-4" /> Default contacts
+      </button>
+      {open && !data && isFetching && <span className="text-xs text-slate-400 self-center">Loading…</span>}
+      {open && data && (
+        <ContactsEditor
+          title="Default contacts for every project"
+          intro="Customers see these in each project's chat and on their Home page. The lead designer and project manager are listed automatically; a project's own contacts (chat → Group info → Edit) replace these topic by topic."
+          initial={data.contacts}
+          rev={data.rev}
+          loadCandidates={contactsApi.companyCandidates}
+          onSave={async (contacts, rev) => qc.setQueryData(["company-contacts"], await contactsApi.saveCompany(contacts, rev))}
+          onConflict={() => refetch()}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
 export default function ProjectsAdminPage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<ProjectStatus | "all">("active");
@@ -94,9 +127,12 @@ export default function ProjectsAdminPage() {
           <p className="text-sm text-slate-400">Each project is a private chat between the customer and their design team.</p>
         </div>
         {admin && (
-          <button onClick={() => setEditing({ project: null })} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold">
-            <Plus className="h-4 w-4" /> New project
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <CompanyContactsButton />
+            <button onClick={() => setEditing({ project: null })} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold">
+              <Plus className="h-4 w-4" /> New project
+            </button>
+          </div>
         )}
       </div>
 

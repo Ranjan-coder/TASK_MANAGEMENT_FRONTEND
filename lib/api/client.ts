@@ -1,4 +1,5 @@
-import axios from "axios";
+import axios, { type InternalAxiosRequestConfig } from "axios";
+import { isLeaving, leaveTo } from "@/lib/auth/session";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api/v1";
 
@@ -30,18 +31,27 @@ const refreshOnce = () => {
   return refreshing;
 };
 
-/** Go to sign-in once, without a history entry (repeated full reloads raced the app's start-up). */
-let leaving = false;
+/** Go to sign-in once, without a history entry (shared with sign-out: lib/auth/session.ts). */
 const goToLogin = () => {
-  if (typeof window === "undefined" || leaving || window.location.pathname.startsWith("/login")) return;
-  leaving = true;
-  window.location.replace("/login");
+  if (typeof window === "undefined" || window.location.pathname.startsWith("/login")) return;
+  leaveTo("/login");
 };
+
+/**
+ * While the page is being left (signed out / session over), nothing new is
+ * sent: those calls could only fail with 401 and start a pointless refresh.
+ */
+const blockWhileLeaving = (config: InternalAxiosRequestConfig) => {
+  if (isLeaving()) return Promise.reject(new axios.CanceledError("Signed out"));
+  return config;
+};
+apiClient.interceptors.request.use(blockWhileLeaving);
 
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    if (axios.isCancel(error) || isLeaving()) return Promise.reject(error);
 
     // Handle 401 and token refresh
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {

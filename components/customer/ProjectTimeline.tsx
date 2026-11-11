@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Check, MessageSquare, CalendarClock } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, MessageSquare, CalendarClock, Contact, ChevronDown } from "lucide-react";
+import { ContactCards } from "@/components/projects/ContactCards";
+import { askInChat } from "@/lib/chat/composeBus";
 import { PROJECT_STAGES, type MyProject } from "@/lib/api/projectExtras.api";
 import type { CustomerFlowView } from "@/lib/api/workflow.api";
 import { cn } from "@/lib/utils";
@@ -71,7 +74,38 @@ export function ProjectTimeline({ project }: { project: MyProject }) {
           )}
         </div>
       )}
+      <HomeContacts project={project} />
     </article>
+  );
+}
+
+/**
+ * Who to contact about what (project-contacts-plan.md P4). The list comes with
+ * /projects/mine (no extra request); "Ask in chat" fills the chat's message box
+ * with "@Name" and opens it.
+ */
+function HomeContacts({ project }: { project: MyProject }) {
+  const router = useRouter();
+  if (!project.contacts?.length) return null;
+  return (
+    <details className="group rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+      <summary className="cursor-pointer list-none text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+        <Contact className="h-3.5 w-3.5 text-violet-300" /> Who to contact
+        <span className="text-slate-500 font-normal">· {project.contacts.length}</span>
+        <ChevronDown className="h-3.5 w-3.5 ml-auto text-slate-500 transition group-open:rotate-180" aria-hidden />
+      </summary>
+      <div className="mt-2">
+        <ContactCards
+          compact
+          contacts={project.contacts}
+          projectName={project.name}
+          onAsk={(c) => {
+            askInChat(project._id, { id: c.person._id, name: c.person.name });
+            router.push(`/chat/${project._id}`);
+          }}
+        />
+      </div>
+    </details>
   );
 }
 
@@ -154,6 +188,7 @@ function FlowTimeline({ project, flow }: { project: MyProject; flow: CustomerFlo
           )}
         </div>
       )}
+      <HomeContacts project={project} />
     </article>
   );
 }
